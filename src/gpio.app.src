@@ -1,0 +1,17 @@
+{application, gpio,
+ [
+  {description, "GPIO Server."},
+  {vsn, "1"},
+  {registered, []},
+  {modules, [ 
+              gpio_server,
+              gpio_app,
+              gpio_sup
+            ] },
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { gpio_app, []}},
+  {env, []}
+ ]}.
