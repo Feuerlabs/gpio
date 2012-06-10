@@ -6,17 +6,12 @@
 -behavior(gen_server).
 
 -export([start_link/0]).
-
-
 -export([init/1, 
          handle_call/3,
          handle_cast/2,
          handle_info/2,
          terminate/2, 
          code_change/3]).
-
-
--export([sequence/2]).
 
 
 -define (GPIODRV_CMD_MASK, 32#0000000F).
@@ -96,31 +91,27 @@ next_step(Port, State, []) ->
 
 
 
-sequence(Port, T) ->
-    gen_server:call(?MODULE, {sequence, Port, T}).
-
-
-handle_call(sequence, _From, {Port, T}) ->
+handle_call({sequence, Port, T}, _From, State) ->
     Res = get_pin_state(Port),
     case Res of
         ok -> 
-            { reply, next_step(Port, get_pin_state(Port), T), Port };
+            { reply, next_step(Port, get_pin_state(Port), T), State };
 
         _ -> 
-            { reply, Res, { Port } }
-    end.
+            { reply, Res, State }
+    end;
 
 
-init([Pin, Direction, DefaultState, SharedLib]) ->
-    io:format("init(): Pin[~w] Direction[~w] DefaultState[~w] Lib[~w]~n",
+handle_call({ open_pin, Pin, Direction, DefaultState, SharedLib}, _From, State) ->
+    io:format("open(): Pin[~w] Direction[~w] DefaultState[~w] Lib[~w]~n",
               [Pin, Direction, DefaultState, SharedLib]),
 
     process_flag(trap_exit, true),
 
-    Res = case erl_ddll:load(".", SharedLib) of
+    Res = case erl_ddll:load("priv", SharedLib) of
         ok -> ok;
         { error, already_loaded } -> ok;
-        _ -> { error, could_not_load_driver }
+        _X -> _X
     end,
 
     case Res of 
@@ -129,16 +120,15 @@ init([Pin, Direction, DefaultState, SharedLib]) ->
             port_control(Port,
                          convert_to_bits(Direction) bor convert_to_bits(DefaultState),
                          integer_to_list(Pin)),
-            { ok, Port };
-        _ -> Res
-    end;
+            { reply, ok, Port };
 
-init([Pin, Direction, DefaultState]) ->
-    init([Pin, Direction, DefaultState, "gpio_driver"]);
+        _ -> { reply, Res, State}
+    end.
 
-init(_) ->
-    { error, illegal_argument }.
 
+init(_Arg) ->
+    { ok, nil }.
+   
 terminate(_Reason, Port) ->
     convert_return_value(port_control(Port, ?GPIODRV_CMD_CLOSE, "")).
 
