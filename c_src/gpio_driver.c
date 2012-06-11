@@ -106,6 +106,21 @@ DRIVER_INIT(gpio_driver)
     return &gpio_driver_entry;
 }
 
+static char state_to_return_value(GPIOState state)
+{
+    switch(state) {
+    case GPIOLow:
+        return GPIODRV_RES_LOW;
+
+    case GPIOHigh:
+        return GPIODRV_RES_HIGH;
+
+    default:
+        break;
+    }
+
+    return GPIODRV_RES_INCORRECT_STATE;
+}
 
 static ErlDrvData gpio_start(ErlDrvPort port, char *command)
 {
@@ -127,16 +142,27 @@ static void gpio_stop (ErlDrvData drv_data)
 
 static unsigned char gpio_get_state(GPIOContext* context)
 {
+    printf("gpio_get_state(): Pin[%d]: State[%d]\r\n",
+           context->mPin,
+           context->mCurrentState);
+
     return context->mCurrentState;
 }
 
 
 static unsigned char gpio_set_state(GPIOContext* context, GPIOState state)
 {
-    // Do we have the pin open?
-    if (context->mDescriptor == -1)
-        return GPIODRV_RES_INCORRECT_STATE;
+    printf("gpio_set_state(): Pin[%d]: OldState[%d] NewState[%d]\r\n",
+           context->mPin,
+           context->mCurrentState,
+           state);
 
+    // Do we have the pin open?
+    if (context->mDescriptor == -1) {
+        context->mCurrentState = state;
+        return GPIODRV_RES_OK;
+//        return GPIODRV_RES_INCORRECT_STATE;
+    }
     context->mCurrentState = state;
     switch(state) {
     case GPIOLow:
@@ -151,6 +177,7 @@ static unsigned char gpio_set_state(GPIOContext* context, GPIOState state)
     default:
         break;
     }
+    puts("Err\r");
     return GPIODRV_RES_ILLEGAL_ARG;
 }
 
@@ -250,12 +277,8 @@ static ErlDrvSSizeT gpio_control (ErlDrvData drv_data,
     GPIOContext* ctx = 0;
 
     ctx = (GPIOContext*) drv_data;
-    printf("gpio_control(): command[%X] len[%d]\n\r", command, len);
-
 
     switch(command & GPIODRV_CMD_MASK) {
-
-
     case GPIODRV_CMD_OPEN_FOR_INPUT:
     case GPIODRV_CMD_OPEN_FOR_OUTPUT:
     case GPIODRV_CMD_OPEN_FOR_BIDIRECTIONAL:
@@ -295,15 +318,13 @@ static ErlDrvSSizeT gpio_control (ErlDrvData drv_data,
 
     // Are we polling?
     case GPIODRV_CMD_GET_STATE:
-        puts("GetState\r");
-        **rbuf =  gpio_get_state(ctx);
+        **rbuf = state_to_return_value(gpio_get_state(ctx));
         return 1;
 
 
     // Are we setting state
     case GPIODRV_CMD_SET_STATE:
-        puts("SetState\r");
-        **rbuf =  gpio_set_state(ctx, command & GPIODRV_CMD_ARG_MASK);
+        **rbuf = gpio_set_state(ctx, command & GPIODRV_CMD_ARG_MASK);
         return 1;
 
     // Are we closing?
