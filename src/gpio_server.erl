@@ -1,20 +1,37 @@
-%% (C) 2012 Feuerlabs, Inc
-%%
+%%%-------------------------------------------------------------------
+%%% @author magnus <magnus@t520.local>
+%%% @copyright (C) 2012, Feuerlabs, Inc. All Rights Reserved
+%%% @doc
+%%%
+%%% @end
+%%% Created : 11 Jun 2012 by magnus <magnus@t520.local>
+%%%-------------------------------------------------------------------
+
 
 
 -module(gpio_server).
 -behavior(gen_server).
 
+%% API
 -export([start_link/0]).
--export([init/1,
-         handle_call/3,
-         handle_cast/2,
-         handle_info/2,
-         terminate/2,
-         code_change/3]).
 
+%% gen_server callbacks
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+         terminate/2, code_change/3]).
+
+%% timer exposed function 
 -export([next_step/3]).
 
+-define(SERVER, ?MODULE). 
+
+%% State record.
+-record(state, {
+          pins = [] 
+         }).
+
+%%
+%% Bitmasks used when interface port driver.
+%%
 -define (GPIODRV_CMD_MASK, 32#0000000F).
 -define (GPIODRV_CMD_OPEN_FOR_INPUT,32#00000001).
 -define (GPIODRV_CMD_OPEN_FOR_OUTPUT, 32#00000002).
@@ -33,10 +50,126 @@
 -define (GPIODRV_RES_ILLEGAL_ARG, <<3:8>>).
 -define (GPIODRV_RES_IO_ERROR, <<4:8>>).
 -define (GPIODRV_RES_INCORRECT_STATE, <<5:8>>).
--define (DEFAULT_GPIO_DRIVER, "gpio_driver").
+-define (GPIO_DRIVER, "gpio_driver").
 
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Starts the server
+%%
+%% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
+%% @end
+%%--------------------------------------------------------------------
 start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Initializes the server
+%%
+%% @spec init(Args) -> {ok, State} |
+%%                     {ok, State, Timeout} |
+%%                     ignore |
+%%                     {stop, Reason}
+%% @end
+%%--------------------------------------------------------------------
+init([]) ->
+    {ok, #state{}}.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handling call messages
+%%
+%% @spec handle_call(Request, From, State) ->
+%%                                   {reply, Reply, State} |
+%%                                   {reply, Reply, State, Timeout} |
+%%                                   {noreply, State} |
+%%                                   {noreply, State, Timeout} |
+%%                                   {stop, Reason, Reply, State} |
+%%                                   {stop, Reason, State}
+%% @end
+%%--------------------------------------------------------------------
+handle_call({sequence, Port, T}, _From, State) ->
+    io:format("handle_call{ sequence, Port[~w] T[~w]}~n", [ Port, T ]),
+    case get_pin_state(Port) of
+        low -> { reply, next_step(Port, high, T), State };
+        high -> { reply, next_step(Port, low, T), State };
+        _Res -> { error, _Res, State }
+    end;
+
+
+
+handle_call({ open_pin, Pin, Direction, DefaultState}, _From, State) ->
+    io:format("handle_call{ open_pin, Pin[~w] Direction[~w] DefaultState[~w] Lib[~w]}~n",
+              [Pin, Direction, DefaultState, ?GPIO_DRIVER]),
+
+    process_flag(trap_exit, true),
+
+    LoadRes = erl_ddll:load(code:priv_dir(gpio), ?GPIO_DRIVER),
+
+    if LoadRes =:= ok; LoadRes =:= { error, already_loaded } -> 
+            open_gpio_pin(Pin, Direction, DefaultState, State);
+
+       true -> { reply, LoadRes, State }
+    end.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handling cast messages
+%%
+%% @spec handle_cast(Msg, State) -> {noreply, State} |
+%%                                  {noreply, State, Timeout} |
+%%                                  {stop, Reason, State}
+%% @end
+%%--------------------------------------------------------------------
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Handling all non call/cast messages
+%%
+%% @spec handle_info(Info, State) -> {noreply, State} |
+%%                                   {noreply, State, Timeout} |
+%%                                   {stop, Reason, State}
+%% @end
+%%--------------------------------------------------------------------
+handle_info(_Info, State) ->
+    {noreply, State}.
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Convert process state when code is changed
+%%
+%% @spec code_change(OldVsn, State, Extra) -> {ok, NewState}
+%% @end
+%%--------------------------------------------------------------------
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% This function is called by a gen_server when it is about to
+%% terminate. It should be the opposite of Module:init/1 and do any
+%% necessary cleaning up. When it returns, the gen_server terminates
+%% with Reason. The return value is ignored.
+%%
+%% @spec terminate(Reason, State) -> void()
+%% @end
+%%--------------------------------------------------------------------
+terminate(_Reason, _State) ->
+    ok.
+
+
 
 convert_to_bits(output) -> ?GPIODRV_CMD_OPEN_FOR_OUTPUT;
 convert_to_bits(input) -> ?GPIODRV_CMD_OPEN_FOR_INPUT;
@@ -93,54 +226,20 @@ next_step(Port, high, [Duration | T]) ->
 next_step(Port, State, []) ->
     set_pin_state(Port, State).
 
+open_gpio_pin(Pin, Direction, DefaultState, State) ->
+    %%
+    %% Check if we've already opened the pin.
+    %%
+    Existing = proplists:get_value(Pin, State),
 
-
-handle_call({sequence, Port, T}, _From, State) ->
-    io:format("handle_call{ sequence, Port[~w] T[~w]}~n", [ Port, T ]),
-    case get_pin_state(Port) of
-        low -> { reply, next_step(Port, high, T), State };
-        high -> { reply, next_step(Port, low, T), State };
-        _Res -> { error, _Res, State }
-    end;
-
-
-handle_call({ open_pin, Pin, Direction, DefaultState, SharedLib}, _From, State) ->
-    io:format("handle_call{ open_pin, Pin[~w] Direction[~w] DefaultState[~w] Lib[~w]}~n",
-              [Pin, Direction, DefaultState, SharedLib]),
-
-    process_flag(trap_exit, true),
-
-    Res = case erl_ddll:load("priv", SharedLib) of
-        ok -> ok;
-        { error, already_loaded } -> ok;
-        _X -> _X
-    end,
-
-    case Res of
-        ok ->
-            Port = open_port({spawn, SharedLib}, []),
+    case Existing of 
+        undefined ->
+            Port = open_port({spawn, ?GPIO_DRIVER}, []),
             port_control(Port,
                          convert_to_bits(Direction) bor convert_to_bits(DefaultState),
                          integer_to_list(Pin)),
-            { reply, {ok, Port}, State };
 
-        _ -> { reply, {Res, nil}, State}
+            NewState = lists:append(State, [ { Pin, Port } ]),
+            { reply, Port, NewState };
+        Port -> { reply, Port, State}
     end.
-
-
-init(_Arg) ->
-    { ok, nil }.
-
-terminate(_Reason, Port) ->
-    convert_return_value(port_control(Port, ?GPIODRV_CMD_CLOSE, "")).
-
-handle_info({_Msg, _Pid, _Reason}, Port) ->
-    { noreply, Port }.
-
-code_change(_OldVsn, Port, _Extra) ->
-    {ok, Port}.
-
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-
