@@ -9,8 +9,11 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <string.h>
+#include <errno.h>
 #include <unistd.h>
 #include <stdio.h>
+
+#define DEBUG 1
 
 static ErlDrvData gpio_start (ErlDrvPort port, char *command);
 
@@ -65,14 +68,15 @@ static ErlDrvEntry gpio_driver_entry = {
 #define GPIODRV_CMD_SET_STATE 0x00000004
 #define GPIODRV_CMD_GET_STATE 0x00000005
 #define GPIODRV_CMD_CLOSE  0x00000006
+#define GPIODRV_CMD_GET_DEFAULT_STATE 0x00000007
 
 #define GPIODRV_CMD_ARG_MASK 0x000000F0
 #define GPIODRV_CMD_ARG_LOW 0x00000010
 #define GPIODRV_CMD_ARG_HIGH 0x00000020
 
 #define GPIODRV_RES_OK 0
-#define GPIODRV_RES_HIGH 1
-#define GPIODRV_RES_LOW 2
+#define GPIODRV_RES_LOW 1
+#define GPIODRV_RES_HIGH 2
 #define GPIODRV_RES_ILLEGAL_ARG 3
 #define GPIODRV_RES_IO_ERROR 4
 #define GPIODRV_RES_INCORRECT_STATE 5
@@ -127,8 +131,9 @@ static ErlDrvData gpio_start(ErlDrvPort port, char *command)
     GPIOContext *ctx = 0;
 
     ctx = (GPIOContext*) driver_alloc(sizeof(GPIOContext));
-    ctx->mDirection = GPIOInOut;
-    ctx->mCurrentState = GPIOLow;
+    ctx->mDirection = GPIOUndefinedDirection;
+    ctx->mCurrentState = GPIOUndefinedState;
+    ctx->mDefaultState = GPIOUndefinedState;
     ctx->mPin = -1;
     ctx->mDescriptor = -1; // Not open
     set_port_control_flags(port, PORT_CONTROL_FLAG_BINARY);
@@ -142,27 +147,31 @@ static void gpio_stop (ErlDrvData drv_data)
 
 static unsigned char gpio_get_state(GPIOContext* context)
 {
-    printf("gpio_get_state(): Pin[%d]: State[%d]\r\n",
-           context->mPin,
-           context->mCurrentState);
-
     return context->mCurrentState;
+}
+
+static unsigned char gpio_get_default_state(GPIOContext* context)
+{
+    return context->mDefaultState;
 }
 
 
 static unsigned char gpio_set_state(GPIOContext* context, GPIOState state)
 {
-    printf("gpio_set_state(): Pin[%d]: OldState[%d] NewState[%d]\r\n",
-           context->mPin,
-           context->mCurrentState,
-           state);
+    // Do we already have the correct state?
+    if (context->mCurrentState == state)
+        return GPIODRV_RES_OK;
+
+#ifdef DEBUG
+    context->mCurrentState = state;
+    return GPIODRV_RES_OK;
+#endif
 
     // Do we have the pin open?
     if (context->mDescriptor == -1) {
-        context->mCurrentState = state;
-        return GPIODRV_RES_OK;
-//        return GPIODRV_RES_INCORRECT_STATE;
+        return GPIODRV_RES_INCORRECT_STATE;
     }
+
     context->mCurrentState = state;
     switch(state) {
     case GPIOLow:
@@ -177,7 +186,6 @@ static unsigned char gpio_set_state(GPIOContext* context, GPIOState state)
     default:
         break;
     }
-    puts("Err\r");
     return GPIODRV_RES_ILLEGAL_ARG;
 }
 
@@ -192,14 +200,21 @@ static ErlDrvSSizeT gpio_open_port(GPIOContext* ctx)
         ctx->mDescriptor = -1;
     }
 
+#ifdef DEBUG
+    ctx->mCurrentState = ctx->mDefaultState;
+    printf("gpio_open_port(DEBUG): current_state[%d]\r\n", ctx->mCurrentState);
+    return GPIODRV_RES_OK;
+#endif
+
     // Open the export file that we can use to ask the kernel
     // to export control to us. See kernel/Documentation/gpio.txt
     desc = open("/sys/class/gpio/export", O_WRONLY);
 
     // Did we fail to open the export file?
-    if (desc == -1)
+    if (desc == -1) {
+        printf("Failed to open /sys/class/gpio/export: %s\r\n", strerror(errno));
         return GPIODRV_RES_IO_ERROR;
-
+    }
     // Write  the pin number we want to use and close the export file
     sprintf(pin_buf, "%d", ctx->mPin);
     write(desc, pin_buf, strlen(pin_buf));
@@ -216,8 +231,10 @@ static ErlDrvSSizeT gpio_open_port(GPIOContext* ctx)
     desc = open(pin_buf, O_WRONLY);
 
     // Did we fail to open the direction file?
-    if (desc == -1)
+    if (desc == -1) {
+        printf("Failed to open [%s]: %s\r\n", pin_buf, strerror(errno));
         return GPIODRV_RES_IO_ERROR;
+    }
 
     // If this is an output pin, setup the initial state.
     if (ctx->mDirection == GPIOOut || ctx->mDirection == GPIOInOut) {
@@ -225,6 +242,8 @@ static ErlDrvSSizeT gpio_open_port(GPIOContext* ctx)
             write(desc, "low", 1);
         else
             write(desc, "high", 1);
+
+        ctx->mCurrentState = ctx->mDefaultState;
     }
     else
         write(desc, "in", 1);
@@ -257,8 +276,10 @@ static ErlDrvSSizeT gpio_open_port(GPIOContext* ctx)
     }
 
     // Did we fail to open the direction file?
-    if (ctx->mDescriptor == -1)
+    if (ctx->mDescriptor == -1) {
+        printf("Failed to open [%s]: %s\r\n", pin_buf, strerror(errno));
         return GPIODRV_RES_IO_ERROR;
+    }
 
     return GPIODRV_RES_OK;
 }
@@ -303,7 +324,11 @@ static ErlDrvSSizeT gpio_control (ErlDrvData drv_data,
             return 1;
         }
 
-        printf("Will open pin [%d]\r\n", ctx->mPin);
+        printf("Will open pin [%d] Direction[%d] State[%d] command[%X]\r\n",
+               ctx->mPin,
+               (GPIODirection) (command & GPIODRV_CMD_MASK),
+               (GPIOState) (command & GPIODRV_CMD_ARG_MASK),
+               command);
 
         // Find out direction and default state.
 
@@ -321,6 +346,9 @@ static ErlDrvSSizeT gpio_control (ErlDrvData drv_data,
         **rbuf = state_to_return_value(gpio_get_state(ctx));
         return 1;
 
+    case GPIODRV_CMD_GET_DEFAULT_STATE:
+        **rbuf = state_to_return_value(gpio_get_default_state(ctx));
+        return 1;
 
     // Are we setting state
     case GPIODRV_CMD_SET_STATE:
