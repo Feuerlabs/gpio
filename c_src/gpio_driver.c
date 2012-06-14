@@ -26,6 +26,7 @@ static ErlDrvSSizeT gpio_control(ErlDrvData drv_data,
                                  char **rbuf,
                                  ErlDrvSizeT rlen);
 
+static void gpio_ready_input(ErlDrvData drv_data, ErlDrvEvent event);
 
 #define GPIO_DRV_MAJOR_VER 1
 #define GPIO_DRV_MINOR_VER 0
@@ -35,7 +36,7 @@ static ErlDrvEntry gpio_driver_entry = {
     gpio_start,
     gpio_stop,
     NULL,                        // output
-    NULL,                        // ready_input
+    gpio_ready_input,            // ready_input
     NULL,                        // ready_output
     "gpio_driver",               // the name of the driver
     NULL,                        // finish
@@ -98,11 +99,12 @@ typedef enum  {
 
 
 typedef struct {
+    ErlDrvPort mPort;
     GPIODirection mDirection;
     GPIOState mDefaultState;
     GPIOState mCurrentState;
     int mPin;
-    int mDescriptor; // To /sys/class/gpio/
+    int mDescriptor; // To /sys/class/gpio/gpioX/vale
 } GPIOContext;
 
 DRIVER_INIT(gpio_driver)
@@ -136,6 +138,7 @@ static ErlDrvData gpio_start(ErlDrvPort port, char *command)
     ctx->mDefaultState = GPIOUndefinedState;
     ctx->mPin = -1;
     ctx->mDescriptor = -1; // Not open
+    ctx->mPort = port;
     set_port_control_flags(port, PORT_CONTROL_FLAG_BINARY);
     return (ErlDrvData) ctx;
 }
@@ -158,14 +161,17 @@ static unsigned char gpio_get_default_state(GPIOContext* context)
 
 static unsigned char gpio_set_state(GPIOContext* context, GPIOState state)
 {
+
+#ifdef DEBUG
+    write(context->mDescriptor, (state == GPIOHigh)?"1\n":"0\n", 2);
+    context->mCurrentState = state;
+
+    return GPIODRV_RES_OK;
+#endif
+
     // Do we already have the correct state?
     if (context->mCurrentState == state)
         return GPIODRV_RES_OK;
-
-#ifdef DEBUG
-    context->mCurrentState = state;
-    return GPIODRV_RES_OK;
-#endif
 
     // Do we have the pin open?
     if (context->mDescriptor == -1) {
@@ -180,7 +186,7 @@ static unsigned char gpio_set_state(GPIOContext* context, GPIOState state)
 
 
     case GPIOHigh:
-        write(context->mDescriptor, "0\n", 2);
+        write(context->mDescriptor, "1\n", 2);
         return GPIODRV_RES_OK;
 
     default:
@@ -202,6 +208,30 @@ static ErlDrvSSizeT gpio_open_port(GPIOContext* ctx)
 
 #ifdef DEBUG
     ctx->mCurrentState = ctx->mDefaultState;
+    if (ctx->mDirection == GPIOIn ||
+        ctx->mDirection == GPIOInOut) {
+
+        sprintf(pin_buf, "/tmp/gpio%d.in", ctx->mPin);
+        mkfifo(pin_buf, 0666);
+        ctx->mDescriptor = open(pin_buf, O_RDONLY | O_NONBLOCK);
+        if (ctx->mDescriptor == -1) {
+            printf("Failed to open %s: %s\n\r", pin_buf, strerror(errno));
+            return GPIODRV_RES_OK;
+        }
+
+        driver_select(ctx->mPort, (ErlDrvEvent) ctx->mDescriptor, DO_READ, 1);
+        return GPIODRV_RES_OK;
+    }
+
+    // This is an output pin
+    sprintf(pin_buf, "/tmp/gpio%d.out", ctx->mPin);
+    mkfifo(pin_buf, 0666);
+    ctx->mDescriptor = open(pin_buf, O_RDWR);
+    if (ctx->mDescriptor == -1) {
+        printf("Failed to open %s: %s\n\r", pin_buf, strerror(errno));
+        return GPIODRV_RES_OK;
+    }
+
     printf("gpio_open_port(DEBUG): current_state[%d]\r\n", ctx->mCurrentState);
     return GPIODRV_RES_OK;
 #endif
@@ -281,6 +311,10 @@ static ErlDrvSSizeT gpio_open_port(GPIOContext* ctx)
         return GPIODRV_RES_IO_ERROR;
     }
 
+    if (ctx->mDirection == GPIOIn ||
+        ctx->mDirection == GPIOInOut)
+        driver_select(ctx->mPort, (ErlDrvEvent) ctx->mDescriptor, DO_READ, 1);
+
     return GPIODRV_RES_OK;
 }
 
@@ -357,7 +391,12 @@ static ErlDrvSSizeT gpio_control (ErlDrvData drv_data,
 
     // Are we closing?
     case GPIODRV_CMD_CLOSE:
-        puts("FIXME: Implement Close\r");
+        if (ctx->mDescriptor != -1)
+            driver_select(ctx->mPort, (ErlDrvEvent) ctx->mDescriptor, DO_READ, 0);
+
+        close(ctx->mDescriptor);
+        // FIXME: UNEXPORT
+        ctx->mDescriptor = -1;
         **rbuf = GPIODRV_RES_OK;
         return 1;
 
@@ -370,4 +409,25 @@ static ErlDrvSSizeT gpio_control (ErlDrvData drv_data,
     **rbuf = GPIODRV_RES_ILLEGAL_ARG;
     return 1;
 }
+
+static void gpio_ready_input(ErlDrvData drv_data, ErlDrvEvent event)
+{
+    GPIOContext* ctx = 0;
+    char buf[2];
+    ctx = (GPIOContext*) drv_data;
+    ssize_t rd_res = 0;
+
+    if (ctx->mDescriptor == -1) {
+        printf("gpio_ready_input(): File not open\n");
+        return;
+    }
+
+    rd_res = read(ctx->mDescriptor, buf, 2);
+    if (rd_res != 2) {
+        printf("gpio_ready_input(): Wanted 2 bytes, got %zd\n", rd_res);
+        return;
+    }
+    driver_output(ctx->mPort, buf, 1);
+}
+
 

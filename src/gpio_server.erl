@@ -94,7 +94,6 @@ handle_call({ sequence, Pin, NewSequence}, _From, State) ->
     {_, PinList } = State,
 
     case lists:keyfind(Pin, 1, PinList) of 
-        false -> { reply, not_found, State };
 
         { _Pin, { Port, Sequence } } ->
             io:format("seq(): PinList= ~w Sequence= ~w NewSequence= ~w\n",
@@ -103,8 +102,10 @@ handle_call({ sequence, Pin, NewSequence}, _From, State) ->
             %% is NewSequence the first elements on the queue?
             case Sequence of 
                 [_ | _] ->  
-                    NewPinList = lists:keyreplace(Pin, 1, PinList, {Pin, { Port, Sequence ++ Ne
-wSequence } }),
+                    NewPinList = lists:keyreplace(Pin, 
+                                                  1, 
+                                                  PinList, 
+                                                  {Pin, { Port, Sequence ++ NewSequence } }),
                     { reply, ok, { state, NewPinList }};
 
                 [] -> 
@@ -118,7 +119,9 @@ wSequence } }),
                                       next_step, 
                                       [Pin, get_default_pin_state(Port)]),
                     { reply, ok, { state, NewPinList }}
-                end
+            end;
+
+        false -> { reply, not_found, State }
     end;
 
 handle_call({ get_pin_state, Pin }, _From, State) ->
@@ -132,7 +135,6 @@ handle_call({ get_pin_state, Pin }, _From, State) ->
         not_found ->
             { reply, not_found, State }
     end;
-
 
 handle_call({ i }, _From, State) ->
     { reply, State, State };
