@@ -213,7 +213,7 @@ static ErlDrvSSizeT gpio_open_port(GPIOContext* ctx)
 
         sprintf(pin_buf, "/tmp/gpio%d.in", ctx->mPin);
         mkfifo(pin_buf, 0666);
-        ctx->mDescriptor = open(pin_buf, O_RDONLY | O_NONBLOCK);
+        ctx->mDescriptor = open(pin_buf, O_RDWR);
         if (ctx->mDescriptor == -1) {
             printf("Failed to open %s: %s\n\r", pin_buf, strerror(errno));
             return GPIODRV_RES_OK;
@@ -413,21 +413,24 @@ static ErlDrvSSizeT gpio_control (ErlDrvData drv_data,
 static void gpio_ready_input(ErlDrvData drv_data, ErlDrvEvent event)
 {
     GPIOContext* ctx = 0;
+    char res = 0;
     char buf[2];
     ctx = (GPIOContext*) drv_data;
     ssize_t rd_res = 0;
 
     if (ctx->mDescriptor == -1) {
-        printf("gpio_ready_input(): File not open\n");
+        printf("gpio_ready_input(): File not open\n\r");
         return;
     }
 
     rd_res = read(ctx->mDescriptor, buf, 2);
     if (rd_res != 2) {
-        printf("gpio_ready_input(): Wanted 2 bytes, got %zd\n", rd_res);
+        printf("gpio_ready_input(): Wanted 2 bytes, got %zd\r\n", rd_res);
         return;
     }
-    driver_output(ctx->mPort, buf, 1);
+
+    res = (*buf == '1')?1:0;
+    driver_output(ctx->mPort, (char*) &res, sizeof(res));
 }
 
 

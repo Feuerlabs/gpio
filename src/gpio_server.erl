@@ -17,14 +17,14 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
-%% Timer invoked function 
+%% Timer invoked function
 -export([next_step/2]).
 
 -define(SERVER, ?MODULE).
 
-
 %% State record.
--record(state, { pinlist = [] }).
+-record(pin_list_elem, { pin, subs = [], port, active = false, seq = []}).
+-record(state, { pin_list = [] }).
 
 %%
 %% Bitmasks used when interface port driver.
@@ -90,51 +90,67 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call({ sequence, Pin, NewSequence}, _From, State) ->
-    {_, PinList } = State,
+handle_call({ sequence, Pin, NewSeq}, _From, State) ->
+    PinList = State#state.pin_list,
 
-    case lists:keyfind(Pin, 1, PinList) of 
+    case lists:keyfind(Pin, #pin_list_elem.pin, PinList) of
+        #pin_list_elem { subs = Subs, port = Port, active = Active, seq = Seq } ->
+            io:format("seq(): PinList= ~w Seq= ~w NewSeq= ~w\n",
+                      [ State#state.pin_list, Seq, NewSeq ] ),
 
-        { _Pin, { Port, Sequence } } ->
-            io:format("seq(): PinList= ~w Sequence= ~w NewSequence= ~w\n",
-                      [ PinList, Sequence, NewSequence ] ),
+            %% Is NewSeq the first elements on the queue?
+            case Active of
+                true ->
+                    NewPinList =
+                        lists:keyreplace(Pin,
+                                         #pin_list_elem.pin,
+                                         PinList,
+                                         #pin_list_elem {
+                                           pin = Pin,
+                                           subs = Subs,
+                                           active = true,
+                                           port = Port,
+                                           seq = Seq ++ NewSeq
+                                          }),
 
-            %% is NewSequence the first elements on the queue?
-            case Sequence of 
-                [_ | _] ->  
-                    NewPinList = lists:keyreplace(Pin, 
-                                                  1, 
-                                                  PinList, 
-                                                  {Pin, { Port, Sequence ++ NewSequence } }),
-                    { reply, ok, { state, NewPinList }};
+                    { reply, ok, #state{ pin_list = NewPinList }};
 
-                [] -> 
-                    [ Duration | T ] = Sequence ++ NewSequence,
-                    NewPinList = lists:keyreplace(Pin, 1, PinList, {Pin, { Port, T } }),
+                false ->
+                    [ Duration | T ] = NewSeq,
+                    NewPinList = lists:keyreplace(Pin,
+                                                  #pin_list_elem.pin,
+                                                  PinList,
+                                                  #pin_list_elem {
+                                                    pin = Pin,
+                                                    active = true,
+                                                    subs = Subs,
+                                                    port = Port,
+                                                    seq = T
+                                                  }),
                     io:format("seq(): NewPinList= ~w\n", [ NewPinList ] ),
-                    set_pin_state(Port, get_inverse_state(get_default_pin_state(Port))),
+                    set_pin_value(Port, get_inverse_state(get_default_pin_value(Port))),
 
-                    timer:apply_after(Duration, 
-                                      gpio_server, 
-                                      next_step, 
-                                      [Pin, get_default_pin_state(Port)]),
-                    { reply, ok, { state, NewPinList }}
+                    timer:apply_after(Duration,
+                                      gpio_server,
+                                      next_step,
+                                      [Pin, get_default_pin_value(Port)]),
+                    { reply, ok, #state { pin_list = NewPinList }}
             end;
 
         false -> { reply, not_found, State }
     end;
 
-handle_call({ get_pin_state, Pin }, _From, State) ->
 
-    {_, PinList } = State,
+handle_call({ get_pin_value, Pin }, _From, State) ->
 
-    case proplists:get_value(Pin, PinList, not_found) of
-        { Port, _Sequence } ->
-            { reply, get_pin_state(Port), State };        
-            
-        not_found ->
-            { reply, not_found, State }
+    case lists:keyfind(Pin, #pin_list_elem.pin, State#state.pin_list) of
+        false ->
+            { reply, not_found, State };
+
+        #pin_list_elem { port = Port }  ->
+            { reply, get_pin_value(Port), State }
     end;
+
 
 handle_call({ i }, _From, State) ->
     { reply, State, State };
@@ -149,20 +165,85 @@ handle_call({ open_pin, Pin, Direction, DefaultState}, _From, State) ->
        true -> { reply, LoadRes, State }
     end;
 
-handle_call({ pop_next_duration, Pin}, _From, State) ->
-    {_, PinList } = State,
+handle_call({ subscribe, Pin, SubsPort }, _From, State) ->
+    PinList = State#state.pin_list,
 
-    case lists:keytake(Pin, 1, PinList) of 
-        { value, { _, {Port, Sequence} }, TempState } ->
-            case Sequence of 
-                [ Duration | T ] -> 
-                    { reply,  {ok, Port, Duration}, { state, [ { Pin, { Port, T } } ] ++ TempState }
-                    };
- 
-                [] ->  { reply, { empty, Port }, State }
+
+    case lists:keytake(Pin, #pin_list_elem.pin, PinList) of
+        {
+          value,
+          #pin_list_elem {
+            subs = Subs,
+            active = Active,
+            port = Port,
+            seq = Seq },
+          TempState
+        } -> {
+          reply,
+          ok,
+          #state {
+            pin_list = [ #pin_list_elem {
+                            pin = Pin,
+                            active = Active,
+                            subs = Subs ++ [ SubsPort ],
+                            port = Port,
+                            seq = Seq
+                           }
+                       ] ++ TempState
+           }
+         };
+
+        _ ->
+            { reply, not_found, State }
+    end;
+
+handle_call({ pop_next_duration, Pin}, _From, State) ->
+    PinList = State#state.pin_list,
+
+    io:format("pop_next_duration(): PinList ~w\n", [ PinList ]),
+
+    case lists:keytake(Pin, #pin_list_elem.pin, PinList) of
+        { value, #pin_list_elem { subs = Subs, port = Port, seq = Seq }, TempState } ->
+            case Seq of
+                [ Duration | T ] -> {
+                  reply,
+                  {
+                    ok,
+                    Port,
+                    Duration
+                  },
+                  #state {
+                    pin_list = [ #pin_list_elem {
+                                    pin = Pin,
+                                    active = true,
+                                    subs = Subs,
+                                    port = Port,
+                                    seq = T
+                                   }
+                               ] ++ TempState
+                   }
+                 };
+
+                [] ->  {
+                  reply,
+                  {
+                    empty,
+                    Port
+                  },
+                  #state {
+                    pin_list = [ #pin_list_elem {
+                                    pin = Pin,
+                                    active = false,
+                                    subs = Subs,
+                                    port = Port,
+                                    seq = []
+                                   }
+                               ] ++ TempState
+                   }
+                 }
             end;
 
-        false -> 
+        false ->
             { reply, not_found, State }
 
     end.
@@ -190,8 +271,28 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(_Info, State) ->
-    {noreply, State}.
+handle_info(Info, State) ->
+    { Port, { data, [ BinPinValue ] } } = Info,
+
+    case BinPinValue of
+        1 -> PinValue = high;
+        0 -> PinValue = low;
+        _ -> PinValue = unknown
+    end,
+
+    case lists:keyfind(Port, #pin_list_elem.port, State#state.pin_list) of
+        false ->
+            {noreply, State};
+
+        #pin_list_elem { pin = Pin, subs = Subs }  ->
+            lists:map(fun(TargetSubs) ->
+                              TargetSubs ! { gpio_pin_input, Pin, PinValue },
+                              false
+                      end,
+                      Subs),
+            { noreply, State }
+    end.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -242,27 +343,27 @@ get_inverse_state(low) -> high;
 get_inverse_state(high) -> low.
 
 
-set_pin_state(Port, State) ->
+set_pin_value(Port, PinValue) ->
     Res = port_control(Port,
-                       ?GPIODRV_CMD_SET_STATE bor convert_to_bits(State),
+                       ?GPIODRV_CMD_SET_STATE bor convert_to_bits(PinValue),
                        [0]),
-    io:format("set_pin_state Port[~w] [~w]~n", [ Port, State ]),
+    io:format("set_pin_value Port[~w] [~w]~n", [ Port, PinValue ]),
     convert_return_value(Res).
 
 
-get_pin_state(Port) ->
+get_pin_value(Port) ->
     Res = port_control(Port,
                          ?GPIODRV_CMD_GET_STATE,
                          [0]),
-    io:format("~nget_pin_state State[~w]~n", [ convert_return_value(Res) ]),
+    io:format("~nget_pin_value State[~w]~n", [ convert_return_value(Res) ]),
     convert_return_value(Res).
 
 
-get_default_pin_state(Port) ->
+get_default_pin_value(Port) ->
     Res = port_control(Port,
                        ?GPIODRV_CMD_GET_DEFAULT_STATE,
                        [0]),
-    io:format("~nget_default_pin_state State[~w]~n", [ Res ]),
+    io:format("~nget_default_pin_value State[~w]~n", [ Res ]),
     convert_return_value(Res).
 
 
@@ -272,29 +373,29 @@ next_step(Pin, PinValue ) ->
 
     %% next_step is invoked by the timer:apply_after function, which
     %% runs in its own process. This means that we need to pop off
-    %% the next duration from the gen_serer's Sequence list for the
+    %% the next duration from the gen_serer's Seq list for the
     %% given pin.
-    
+
     PopRes = gen_server:call(gpio_server, { pop_next_duration, Pin }),
 
     io:format("next_step(): PopRes: ~w \n", [ PopRes ]),
-    case PopRes of 
+    case PopRes of
         { ok, Port, Duration } ->
             io:format("next_step(): Duration: ~w\n", [ Duration ]),
-            set_pin_state(Port, PinValue),
-            timer:apply_after(Duration, gpio_server, next_step, 
+            set_pin_value(Port, PinValue),
+            timer:apply_after(Duration, gpio_server, next_step,
                               [Pin, get_inverse_state(PinValue) ]),
             ok;
 
-        { empty, Port } -> 
+        { empty, Port } ->
             io:format("next_step(): Empty [~w]\n", [ { ok } ]),
-            set_pin_state(Port, get_default_pin_state(Port)),
+            set_pin_value(Port, get_default_pin_value(Port)),
             empty;
 
         not_found ->
             not_found;
 
-        _X -> 
+        _X ->
             error
     end.
 
@@ -304,24 +405,26 @@ next_step(Pin, PinValue ) ->
 %%-----------
 open_gpio_pin(Pin, Direction, DefaultPinValue, State) ->
     io:format("DefaultPinValue[~w] State[~w]\n", [ DefaultPinValue, State ] ),
-    {_, PinList } = State,
 
+    PinList = State#state.pin_list,
 
     %%
     %% Check if we've already opened the pin.
     %%
-    case lists:keyfind(Pin, 1, PinList) of
+    case lists:keyfind(Pin, #pin_list_elem.pin, PinList) of
         %% No exist?
         false ->
             Port = open_port({spawn, ?GPIO_DRIVER}, []),
             Res = convert_return_value(
                     port_control(Port,
-                                 convert_to_bits(Direction) bor 
+                                 convert_to_bits(Direction) bor
                                      convert_to_bits(DefaultPinValue),
                                  integer_to_list(Pin))),
 
             if Res =:= ok ->
-               NewState = { state, lists:append(PinList, [ { Pin, { Port, [] } } ] ) },
+               NewState = #state {
+                 pin_list = lists:append(PinList, [ #pin_list_elem { pin = Pin, port = Port } ])
+                },
                { reply, ok, NewState };
                true -> { reply, Res, State }
             end;
