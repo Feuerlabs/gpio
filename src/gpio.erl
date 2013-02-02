@@ -10,13 +10,13 @@
 
 -module(gpio).
 
--export([open_pin/3, sequence/2, get_pin_value/1, subscribe/2,i/0]).
+-export([open_pin/3, sequence/3, get_pin_value/1, subscribe/2,i/0]).
 
 open_pin(Pin, Direction, DefaultState) ->
     gen_server:call(gpio_server, {open_pin, Pin, Direction, DefaultState }).
 
-sequence(Pin, T) ->
-    gen_server:call(gpio_server, {sequence, Pin, T}).
+sequence(Pin, T, Replace) ->
+    gen_server:call(gpio_server, {sequence, Pin, T, Replace}).
 
 get_pin_value(Pin) ->
     gen_server:call(gpio_server, {get_pin_state, Pin}).

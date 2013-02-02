@@ -98,7 +98,7 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call({ sequence, Pin, NewSeq}, _From, State) ->
+handle_call({ sequence, Pin, NewSeq, Replace}, _From, State) ->
     PinList = State#state.pin_list,
 
     case lists:keyfind(Pin, #pin_list_elem.pin, PinList) of
@@ -107,8 +107,9 @@ handle_call({ sequence, Pin, NewSeq}, _From, State) ->
                       [ State#state.pin_list, Seq, NewSeq ] ),
 
             %% Is NewSeq the first elements on the queue?
-            case Active of
-                true ->
+	    %% Are we to replace the existing sequence?
+            case { Replace, Active } of
+                { false, false } ->
                     NewPinList =
                         lists:keyreplace(Pin,
                                          #pin_list_elem.pin,
@@ -121,9 +122,10 @@ handle_call({ sequence, Pin, NewSeq}, _From, State) ->
                                            seq = Seq ++ NewSeq
                                           }),
 
+
                     { reply, ok, #state{ pin_list = NewPinList }};
 
-                false ->
+                { _, _ } ->
                     [ Duration | T ] = NewSeq,
                     NewPinList = lists:keyreplace(Pin,
                                                   #pin_list_elem.pin,
@@ -440,3 +442,5 @@ open_gpio_pin(Pin, Direction, DefaultPinValue, State) ->
         %% Exists?
         { _, { _, _ } } -> { reply, ok, State}
     end.
+
+
