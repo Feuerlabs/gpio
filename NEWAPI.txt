@@ -1,5 +1,4 @@
 
-
 gpio:init(Pin :: unsigned()) -> ok | {error,Reason::posix()}.
 gpio:set(Pin :: unsigned())  -> ok | {error,Reason::posix()}.
 gpio:clr(Pin :: unsigned())  -> ok | {error,Reason::posix()}.
@@ -11,11 +10,11 @@ gpio:output(Pin) -> ok | {error,Reason::posix()}
 %% extended api
 
 gpio:set_pin(Pin, Level::boolean()) -> ok | {error,Reason::posix()}.
-gpio:set_mask(Mask :: unsigned32()) -> ok | {error,Reason::posix()}.
-gpio:clr_mask(Mask :: unsigned32()) -> ok | {error,Reason::posix()}.
-gpio:set_mask(Set::unsigned(), Mask :: unsigned32()) ->
+gpio:set_mask(Mask :: unsigned()) -> ok | {error,Reason::posix()}.
+gpio:clr_mask(Mask :: unsigned()) -> ok | {error,Reason::posix()}.
+gpio:set_mask(Set::unsigned(), Mask :: unsigned()) ->
 			        ok | {error,Reason::posix()}.
-gpio:clr_mask(Set::unsigned(), Mask :: unsigned32()) ->
+gpio:clr_mask(Set::unsigned(), Mask :: unsigned()) ->
 			       ok | {error,Reason::posix()}.
 
 
