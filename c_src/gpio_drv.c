@@ -366,10 +366,10 @@ static int add_interrupt(gpio_ctx_t* ctx, gpio_pin_t* gp)
 	struct epoll_event ev;
 	
 	ev.events  = EPOLLPRI | EPOLLERR;
-	ev.data.ptr = (void) gp;
+	ev.data.ptr = (void*) gp;
 	
-	if (epoll_ctl(INT_EVENT(epollfd), EPOLL_CTL_ADD, INT_EVENT(gp->fd),
-		      &ev) < 0) {
+	if (epoll_ctl(INT_EVENT(ctx->epollfd), EPOLL_CTL_ADD, 
+		      INT_EVENT(gp->fd), &ev) < 0) {
 	    gpio_errno = errno;
 	    DEBUGF("Failed epoll_ctl add (%d) reason, %s",
 		   INT_EVENT(gp->fd), strerror(errno));
@@ -399,7 +399,7 @@ static int del_interrupt(gpio_ctx_t* ctx, gpio_pin_t* gp)
 	ev.events  = 0;
 	ev.data.fd = INT_EVENT(gp->fd);
 	
-	if (epoll_ctl(INT_EVENT(epollfd), EPOLL_CTL_DEL, INT_EVENT(gp->fd),
+	if (epoll_ctl(INT_EVENT(ctx->epollfd), EPOLL_CTL_DEL, INT_EVENT(gp->fd),
 		      &ev) < 0) {
 	    gpio_errno = errno;
 	    DEBUGF("Failed epoll_ctl del (%d) reason, %s",
@@ -705,7 +705,7 @@ static void gpio_drv_stop(ErlDrvData d)
     }    // add structure cleanup here
 #ifdef USE_EPOLL
     if (INT_EVENT(ctx->epollfd) >= 0)
-	driver_select(ctx->port, INT_EVENT(ctx->epollfd), ERL_DRV_USE, 0);
+	driver_select(ctx->port, ctx->epollfd, ERL_DRV_USE, 0);
 #endif
     driver_free(ctx);
 }
@@ -991,9 +991,10 @@ static void gpio_drv_ready_input(ErlDrvData d, ErlDrvEvent e)
 	    if (events[i].events & EPOLLPRI)
 		send_interrupt(ctx, (gpio_pin_t*) events[i].data.ptr);
 	}
+    }
 #else
-	(void) d;
-	(void) e;
+    (void) d;
+    (void) e;
 #endif
 }
 
