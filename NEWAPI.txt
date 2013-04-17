@@ -1,0 +1,25 @@
+-type unsigned() :: non_neg_integer().
+-type posix() :: atom().
+
+-spec gpio:init(Pin :: unsigned()) -> ok | {error,Reason::posix()}.
+-spec gpio:set(Pin :: unsigned())  -> ok | {error,Reason::posix()}.
+-spec gpio:clr(Pin :: unsigned())  -> ok | {error,Reason::posix()}.
+-spec gpio:get(Pin) -> boolean().
+
+-spec gpio:input(Pin) -> ok | {error,Reason::posix()}
+-spec gpio:output(Pin) -> ok | {error,Reason::posix()}
+
+%% extended api
+
+-spec gpio:set_pin(Pin, Level::boolean()) -> ok | {error,Reason::posix()}.
+-spec gpio:set_mask(Mask :: unsigned()) -> ok | {error,Reason::posix()}.
+-spec gpio:clr_mask(Mask :: unsigned()) -> ok | {error,Reason::posix()}.
+-spec gpio:set_mask(Set::unsigned(), Mask :: unsigned()) ->
+			        ok | {error,Reason::posix()}.
+-spec gpio:clr_mask(Set::unsigned(), Mask :: unsigned()) ->
+			       ok | {error,Reason::posix()}.
+
+
+
+
+
