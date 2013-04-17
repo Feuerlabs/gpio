@@ -308,7 +308,7 @@ static int open_value_file(int pin)
 
     if ((fd = open(path, O_RDWR, mode)) < 0)
         DEBUGF("Failed to open %s: %s", path, strerror(errno));
-    
+
     DEBUGF("Value file %s has fd %d", path, fd);
     return fd; 
 }
@@ -330,7 +330,7 @@ static int init_pin(int pin_register, int pin, gpio_ctx_t* ctx)
 	close(fd);
 	return GPIO_NOK;
     }
-
+     
     return GPIO_OK;
 }
 
@@ -343,6 +343,8 @@ static int gpio_set_state(gpio_pin_t* gp, gpio_state_t state)
     if (gp->state == state)
         return GPIO_OK;
     gp->state = state;
+
+    // Should we check that direction is out??
 
     switch(state) {
     case gpio_state_low:
@@ -390,29 +392,47 @@ static int gpio_set_direction(gpio_pin_t* gp, gpio_direction_t direction)
     if ((dir_fd = open(path, O_WRONLY, mode)) < 0)
 	return GPIO_NOK;
 
-    if (direction == gpio_direction_in)
-	if (write(dir_fd, "in", 1) < 0)
+    DEBUGF("Direction file %s has fd %d", path, dir_fd);
+
+    switch(direction) {
+    case gpio_direction_in:
+	if (write(dir_fd, "in", sizeof("in")) < 0)
 	    return GPIO_NOK;
-    else if (direction == gpio_direction_out)
-    {
-	if (gp->state == gpio_state_low)
-	    if (write(dir_fd, "low", 1) < 0)
+	DEBUGF("Wrote in to direction file fd %d", dir_fd);
+	break;
+    case gpio_direction_out:
+	switch(gp->state) {
+	case gpio_state_low:
+	    if (write(dir_fd, "low", sizeof("low")) < 0)
 		return GPIO_NOK;
-	else if (gp->state == gpio_state_high)
-	    if (write(dir_fd, "high", 1) < 0)
+	    DEBUGF("Wrote low to direction file fd %d", dir_fd);
+	    break;
+	case gpio_state_high:
+	    if (write(dir_fd, "high", sizeof("high")) < 0)
 		return GPIO_NOK;
-	// What about state undef ??
-    }
-    else if (direction == gpio_direction_bi)
-    {
-	// What ??
-    }
-    else
-    {
+	    DEBUGF("Wrote high to direction file fd %d", dir_fd);
+	    break;
+	case gpio_state_undef:
+	    // Set to high ?? Write in value file??
+	    gpio_set_state(gp, gpio_state_high);
+	    if (write(dir_fd, "high", sizeof("high")) < 0)
+		return GPIO_NOK;
+	    DEBUGF("Wrote default high to direction file fd %d", dir_fd);
+	    break;
+	default:
+	    errno = EINVAL;
+	    result = GPIO_NOK;
+	    break;
+	}
+	break;
+    case gpio_direction_bi:
+	// ??
+	break;
+    default:
 	errno = EINVAL;
 	result = GPIO_NOK;
+	break;
     }
-    
     return result;
 }
 //--------------------------------------------------------------------
@@ -586,6 +606,7 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	if (gpio_set_direction(gp, gpio_direction_in) != GPIO_OK)
 	    goto error;
 
+	driver_select(ctx->port, (ErlDrvEvent) gp->value_fd, DO_READ, 1);
 	goto ok;
     }
 
