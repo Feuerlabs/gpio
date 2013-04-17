@@ -1,11 +1,11 @@
 PRIVDIR := ../priv
 
-all : $(PRIVDIR)/gpio_driver.so
+all : $(PRIVDIR)/gpio_drv.so
 
 override CFLAGS += -fpic -shared
 
-$(PRIVDIR)/gpio_driver.so : gpio_driver.o
+$(PRIVDIR)/gpio_driver.so : gpio_drv.o
 	$(CC) -shared -fpic $(LDFLAGS) -o $@ $^
 
 lean:
-	$(RM) -f $(PRIVDIR)/gpio_driver.so gpio_driver.o
+	$(RM) -f $(PRIVDIR)/gpio_drv.so gpio_drv.o
