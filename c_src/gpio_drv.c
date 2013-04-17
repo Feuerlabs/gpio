@@ -267,7 +267,7 @@ static ErlDrvSSizeT ctl_reply(int rep,
 }
 
 //--------------------------------------------------------------------
-// Open the export file that we can use to ask the kernel
+// Write in the export file that we can use to ask the kernel
 // to export control to us. See kernel/Documentation/gpio.txt
 //--------------------------------------------------------------------
 static int export(int pin)
@@ -282,6 +282,30 @@ static int export(int pin)
         return GPIO_NOK;
     }
     // Write  the pin number we want to use and close the export file
+    sprintf(buf, "%d", pin);
+    if (write(fd, buf, strlen(buf)) < 0)
+	result = GPIO_NOK;
+
+    close(fd);
+    return result; 
+}
+
+//--------------------------------------------------------------------
+// Write in the unexport file that we can use to ask the kernel
+// to retreive control from us. See kernel/Documentation/gpio.txt
+//--------------------------------------------------------------------
+static int unexport(int pin)
+{
+    int fd = -1;
+    char buf[128];
+    char *path = "/sys/class/gpio/unexport";
+    int result = GPIO_OK;
+
+    if ((fd = open(path, O_WRONLY)) < 0) {
+        DEBUGF("Failed to open %s: reason, %s", path, strerror(errno));
+        return GPIO_NOK;
+    }
+    // Write  the pin number we want to release and close the unexport file
     sprintf(buf, "%d", pin);
     if (write(fd, buf, strlen(buf)) < 0)
 	result = GPIO_NOK;
@@ -532,8 +556,12 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	gpio_pin_t** gpp;
 	gpio_pin_t* gp;
 
+	// Tell linux to take over pin
+	if (unexport(pin) != GPIO_OK) 
+	    return GPIO_NOK;
+    
 	if ((gpp = find_pin(ctx, pin_register, pin)) == NULL)
-	    goto badarg; // or ok ???
+	    goto ok; // or badarg ???
 	
 	gp = *gpp;
 	driver_select(ctx->port, (ErlDrvEvent) gp->value_fd, ERL_DRV_USE, 0);
