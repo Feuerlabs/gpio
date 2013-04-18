@@ -278,7 +278,7 @@ static int is_exported(int pin)
 
     if (snprintf(path, sizeof(path), dirname, pin) >= sizeof(path))
 	return -1;
-    if (lstat(path, &st) < 0) {
+    if (stat(path, &st) < 0) {
 	if (errno == ENOENT)
 	    return 0;
 	return -1;
