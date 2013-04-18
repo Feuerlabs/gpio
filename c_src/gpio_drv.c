@@ -55,10 +55,10 @@ typedef int  ErlDrvSSizeT;
 #define GPIO_OK 0
 
 typedef enum {
-    gpio_direction_undef = -1,
     gpio_direction_in = 1,
     gpio_direction_out = 2,
-    gpio_direction_bi = 3,
+    gpio_direction_low  = 3,  // out but start low
+    gpio_direction_high = 4  // out but start high
 }  gpio_direction_t;
 
 
@@ -231,7 +231,7 @@ static int create_pin(gpio_ctx_t* ctx,
     ctx->first = gp;
     gp->value_fd = fd;
     gp->state = gpio_state_undef;
-    gp->direction = gpio_direction_undef;
+    gp->direction = gpio_direction_in; // assume in for now
     return GPIO_OK;
 }
 
@@ -264,6 +264,28 @@ static ErlDrvSSizeT ctl_reply(int rep,
     *ptr++ = rep;
     memcpy(ptr, buf, len);
     return len+1;
+}
+
+//--------------------------------------------------------------------
+// Check if pin is already exported
+// 
+//--------------------------------------------------------------------
+static int is_exported(int pin)
+{
+    char path[128];
+    char *dirname = "/sys/class/gpio/gpio%d";
+    struct stat st;
+
+    if (snprintf(path, sizeof(path), dirname, pin) >= sizeof(path))
+	return -1;
+    if (lstat(path, &st) < 0) {
+	if (errno == ENOENT)
+	    return 0;
+	return -1;
+    }
+    if (st.st_mode & S_IFDIR)
+	return 1;
+    return -1;
 }
 
 //--------------------------------------------------------------------
@@ -340,21 +362,25 @@ static int open_value_file(int pin)
 static int init_pin(int pin_register, int pin, gpio_ctx_t* ctx) 
 {
     int fd = -1;
-    
-    // Tell linux we will take over pin
-    if (export(pin) != GPIO_OK) 
+
+    switch(is_exported(pin)) {
+    case -1:
 	return GPIO_NOK;
-    
+    case 0:
+	// Tell linux we will take over pin
+	if (export(pin) != GPIO_OK)
+	    return GPIO_NOK;
+	break;
+    case 1:
+	break;
+    }
     // Prepare value file
     if((fd = open_value_file(pin)) < 0)
 	return GPIO_NOK;
-    
-    if (create_pin(ctx, pin_register, pin, fd) != GPIO_OK)
-    {
+    if (create_pin(ctx, pin_register, pin, fd) != GPIO_OK) {
 	close(fd);
 	return GPIO_NOK;
     }
-     
     return GPIO_OK;
 }
 
@@ -396,20 +422,19 @@ static int gpio_set_direction(gpio_pin_t* gp, gpio_direction_t direction)
     mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
     char *fname = "/sys/class/gpio/gpio%d/direction";
     char path[128];
-    int n;
-    int result = GPIO_OK;
 
     DEBUGF("Changing direction from %d to %d on pin %d:%d", 
 	   gp->direction, direction, gp->pin_register, gp->pin);
 
     // Do we already have the correct direction?
-    if (gp->direction == direction)
+    if ((gp->direction == direction) ||
+	((gp->direction == gpio_direction_out) &&
+	 ((direction == gpio_direction_high) ||
+	  (direction == gpio_direction_low))))
         return GPIO_OK;
 
-    gp->direction = direction;
-
     // Generate a correct path to the direction file
-    if ((n = snprintf(path, sizeof(path), fname, gp->pin)) >= sizeof(path))
+    if (snprintf(path, sizeof(path), fname, gp->pin) >= sizeof(path))
 	return GPIO_NOK;
 
     // Open the direction file.
@@ -421,43 +446,39 @@ static int gpio_set_direction(gpio_pin_t* gp, gpio_direction_t direction)
     switch(direction) {
     case gpio_direction_in:
 	if (write(dir_fd, "in", sizeof("in")) < 0)
-	    return GPIO_NOK;
+	    goto error;
+	gp->direction = direction;
 	DEBUGF("Wrote in to direction file fd %d", dir_fd);
 	break;
     case gpio_direction_out:
-	switch(gp->state) {
-	case gpio_state_low:
-	    if (write(dir_fd, "low", sizeof("low")) < 0)
-		return GPIO_NOK;
-	    DEBUGF("Wrote low to direction file fd %d", dir_fd);
-	    break;
-	case gpio_state_high:
-	    if (write(dir_fd, "high", sizeof("high")) < 0)
-		return GPIO_NOK;
-	    DEBUGF("Wrote high to direction file fd %d", dir_fd);
-	    break;
-	case gpio_state_undef:
-	    // Set to high ?? Write in value file??
-	    gpio_set_state(gp, gpio_state_high);
-	    if (write(dir_fd, "high", sizeof("high")) < 0)
-		return GPIO_NOK;
-	    DEBUGF("Wrote default high to direction file fd %d", dir_fd);
-	    break;
-	default:
-	    errno = EINVAL;
-	    result = GPIO_NOK;
-	    break;
-	}
+	if (write(dir_fd, "out", sizeof("out")) < 0)
+	    goto error;
+	gp->direction = direction;
+	DEBUGF("Wrote out to direction file fd %d", dir_fd);
 	break;
-    case gpio_direction_bi:
-	// ??
+    case gpio_direction_low:
+	if (write(dir_fd, "low", sizeof("low")) < 0)
+	    goto error;
+	gp->direction = gpio_direction_out;
+	DEBUGF("Wrote low to direction file fd %d", dir_fd);
+	break;
+    case gpio_direction_high:
+	if (write(dir_fd, "high", sizeof("high")) < 0)
+	    goto error;
+	gp->direction = gpio_direction_out;
+	DEBUGF("Wrote high to direction file fd %d", dir_fd);
 	break;
     default:
 	errno = EINVAL;
-	result = GPIO_NOK;
-	break;
+	goto error;
     }
-    return result;
+    close(dir_fd);
+    return GPIO_OK;
+
+error:
+    close(dir_fd);
+    return GPIO_NOK;
+
 }
 //--------------------------------------------------------------------
 // ErlDriver functions
@@ -615,9 +636,16 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 		goto error;
 	}
 	gp = *gpp;
-	state = (uint8_t) gp->state;
-	DEBUGF("Read state %d for pin %d:%d", state, pin_register, pin);
-	return ctl_reply(1, &state, sizeof(state), rbuf, rsize);
+	lseek(gp->value_fd, 0, SEEK_SET);
+	if (read(gp->value_fd, &state, 1) != 1)
+	    goto error;
+	DEBUGF("Read state %c for pin %d:%d", (char)state, pin_register, pin);
+	state -= '0';
+	if (state > 1) {
+	    errno = EINVAL;
+	    goto error;
+	}
+	return ctl_reply(1, &state, 1, rbuf, rsize);
     }
 
     case CMD_INPUT:
@@ -633,8 +661,6 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	gp = *gpp;
 	if (gpio_set_direction(gp, gpio_direction_in) != GPIO_OK)
 	    goto error;
-
-	driver_select(ctx->port, (ErlDrvEvent) gp->value_fd, DO_READ, 1);
 	goto ok;
     }
 
