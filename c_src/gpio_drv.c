@@ -213,18 +213,17 @@ static gpio_pin_t** find_pin(gpio_ctx_t* ctx,
 //--------------------------------------------------------------------
 // create new gpio pin first in list 
 //--------------------------------------------------------------------
-static int create_pin(gpio_ctx_t* ctx, 
-		      uint8_t pin_register, 
-		      uint8_t pin,
-		      int fd)
+static gpio_pin_t* create_pin(gpio_ctx_t* ctx, 
+			      uint8_t pin_register, 
+			      uint8_t pin,
+			      int fd)
 {
     gpio_pin_t* gp;
 
     if ((gp = driver_alloc(sizeof(gpio_pin_t))) == NULL) {
 	errno = ENOMEM;
-	return GPIO_NOK;
+	return NULL;
     }
-
     gp->next = ctx->first;
     gp->pin_register = pin_register;
     gp->pin = pin;
@@ -232,7 +231,7 @@ static int create_pin(gpio_ctx_t* ctx,
     gp->value_fd = fd;
     gp->state = gpio_state_undef;
     gp->direction = gpio_direction_in; // assume in for now
-    return GPIO_OK;
+    return gp;
 }
 
 //--------------------------------------------------------------------
@@ -346,42 +345,39 @@ static int open_value_file(int pin)
     mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
     char *fname = "/sys/class/gpio/gpio%d/value";
     char path[128];
-    int n;
 
     // Generate a correct path to the file
-    if ((n = snprintf(path, sizeof(path), fname, pin)) >= sizeof(path))
+    if (snprintf(path, sizeof(path), fname, pin) >= sizeof(path))
 	return -1;
-
     if ((fd = open(path, O_RDWR, mode)) < 0)
         DEBUGF("Failed to open %s: %s", path, strerror(errno));
-
-    DEBUGF("Value file %s has fd %d", path, fd);
+    else
+	DEBUGF("Value file %s has fd %d", path, fd);
     return fd; 
 }
 
-static int init_pin(int pin_register, int pin, gpio_ctx_t* ctx) 
+static gpio_pin_t* init_pin(gpio_ctx_t* ctx, int pin_register, int pin) 
 {
+    gpio_pin_t* gp;
     int fd = -1;
 
     switch(is_exported(pin)) {
     case -1:
-	return GPIO_NOK;
+	return NULL;
     case 0:
 	// Tell linux we will take over pin
 	if (export(pin) != GPIO_OK)
-	    return GPIO_NOK;
+	    return NULL;
 	break;
     case 1:
 	break;
     }
     // Prepare value file
     if((fd = open_value_file(pin)) < 0)
-	return GPIO_NOK;
-    if (create_pin(ctx, pin_register, pin, fd) != GPIO_OK) {
+	return NULL;
+    if ((gp=create_pin(ctx, pin_register, pin, fd)) == NULL)
 	close(fd);
-	return GPIO_NOK;
-    }
-    return GPIO_OK;
+    return gp;
 }
 
 static int gpio_set_state(gpio_pin_t* gp, gpio_state_t state)
@@ -562,14 +558,11 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 
     switch(cmd) {
     case CMD_INIT: {
-
 	// Pin already initialized
 	if (find_pin(ctx, pin_register, pin) != NULL)
 	    goto ok; // already open
-	
-	if (init_pin(pin_register, pin, ctx) != GPIO_OK)
+	if (init_pin(ctx, pin_register, pin) == NULL)
 	    goto error;
- 
 	goto ok;
     }
 
@@ -598,10 +591,13 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 
 	// Localise pin or init it
 	if ((gpp = find_pin(ctx, pin_register, pin)) == NULL) {
-	    if (init_pin(pin_register, pin, ctx) != GPIO_OK)
+	    if ((gp=init_pin(ctx, pin_register, pin)) == NULL)
+		goto error;
+	    if (gpio_set_direction(gp, gpio_direction_out) != GPIO_OK)
 		goto error;
 	}
-	gp = *gpp;
+	else
+	    gp = *gpp;
 	if (gpio_set_state(gp, gpio_state_high) != GPIO_OK)
 	    goto error;
 
@@ -614,13 +610,15 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 
 	// Localise pin or init it
 	if ((gpp = find_pin(ctx, pin_register, pin)) == NULL) {
-	    if (init_pin(pin_register, pin, ctx) != GPIO_OK)
+	    if ((gp = init_pin(ctx, pin_register, pin)) == NULL)
+		goto error;
+	    if (gpio_set_direction(gp, gpio_direction_out) != GPIO_OK)
 		goto error;
 	}
-	gp = *gpp;
+	else
+	    gp = *gpp;
 	if (gpio_set_state(gp, gpio_state_low) != GPIO_OK)
 	    goto error;
-
 	goto ok;
     }
 
@@ -632,10 +630,11 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 
 	// Localise pin or init it
 	if ((gpp = find_pin(ctx, pin_register, pin)) == NULL) {
-	    if (init_pin(pin_register, pin, ctx) != GPIO_OK)
+	    if ((gp=init_pin(ctx, pin_register, pin)) == NULL)
 		goto error;
 	}
-	gp = *gpp;
+	else 
+	    gp = *gpp;
 	lseek(gp->value_fd, 0, SEEK_SET);
 	if (read(gp->value_fd, &state, 1) != 1)
 	    goto error;
@@ -655,10 +654,11 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 
 	// Localise pin or init it
 	if ((gpp = find_pin(ctx, pin_register, pin)) == NULL) {
-	    if (init_pin(pin_register, pin, ctx) != GPIO_OK)
+	    if ((gp=init_pin(ctx, pin_register, pin)) == NULL)
 		goto error;
 	}
-	gp = *gpp;
+	else
+	    gp = *gpp;
 	if (gpio_set_direction(gp, gpio_direction_in) != GPIO_OK)
 	    goto error;
 	goto ok;
@@ -671,13 +671,13 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 
 	// Localise pin or init it
 	if ((gpp = find_pin(ctx, pin_register, pin)) == NULL) {
-	    if (init_pin(pin_register, pin, ctx) != GPIO_OK)
+	    if ((gp=init_pin(ctx, pin_register, pin)) == NULL)
 		goto error;
 	}
-	gp = *gpp;
+	else
+	    gp = *gpp;
 	if (gpio_set_direction(gp, gpio_direction_out) != GPIO_OK)
 	    goto error;
-
 	goto ok;
     }
 
@@ -689,7 +689,7 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 
 	// Localise pin or init it
 	if ((gpp = find_pin(ctx, pin_register, pin)) == NULL) {
-	    if (init_pin(pin_register, pin, ctx) != GPIO_OK)
+	    if ((gp=init_pin(ctx, pin_register, pin)) == NULL)
 		goto error;
 	}
 	gp = *gpp;
