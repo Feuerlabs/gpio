@@ -44,12 +44,11 @@ typedef int  ErlDrvSSizeT;
 #define CMD_SET  2
 #define CMD_CLR 3
 #define CMD_GET 4
-#define CMD_INPUT 5
-#define CMD_OUTPUT 6
+#define CMD_SET_DIRECTION 5
+#define CMD_GET_DIRECTION 6
 #define CMD_SET_MASK 7
 #define CMD_CLR_MASK 8
-#define CMD_DIRECTION 9
-#define CMD_RELEASE 10
+#define CMD_RELEASE 9
 
 #define GPIO_NOK -1
 #define GPIO_OK 0
@@ -547,17 +546,19 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 {
     gpio_ctx_t* ctx = (gpio_ctx_t*) d;
     uint8_t* buf = (uint8_t*) buf0;
-    DEBUGF("gpio_drv: ctl: cmd=%u, len=%d", cmd, len);
-
+    gpio_pin_t** gpp;
+    gpio_pin_t* gp;
     uint8_t pin_register;
     uint8_t pin;
-    // Get arguments
-    if (len != 2) goto badarg;
-    pin_register = get_uint8(buf);
-    pin = get_uint8(buf+1);
+
+    DEBUGF("gpio_drv: ctl: cmd=%u, len=%d", cmd, len);
 
     switch(cmd) {
     case CMD_INIT: {
+	if (len != 2) goto badarg;
+	pin_register = get_uint8(buf);
+	pin = get_uint8(buf+1);
+
 	// Pin already initialized
 	if (find_pin(ctx, pin_register, pin) != NULL)
 	    goto ok; // already open
@@ -567,74 +568,76 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
     }
 
     case CMD_RELEASE: {
-	gpio_pin_t** gpp;
-	gpio_pin_t* gp;
+	if (len != 2) goto badarg;
+	pin_register = get_uint8(buf);
+	pin = get_uint8(buf+1);
 
 	// Tell linux to take over pin
 	if (unexport(pin) != GPIO_OK) 
 	    return GPIO_NOK;
-    
 	if ((gpp = find_pin(ctx, pin_register, pin)) == NULL)
 	    goto ok; // or badarg ???
-	
 	gp = *gpp;
 	driver_select(ctx->port, (ErlDrvEvent) gp->value_fd, ERL_DRV_USE, 0);
 	*gpp = gp->next; // unlink
 	driver_free(gp);
-
 	goto ok;
     }
 
     case CMD_SET: {
-	gpio_pin_t** gpp;
-	gpio_pin_t* gp;
+	if (len != 2) goto badarg;
+	pin_register = get_uint8(buf);
+	pin = get_uint8(buf+1);
 
 	// Localise pin or init it
-	if ((gpp = find_pin(ctx, pin_register, pin)) == NULL) {
+	if ((gpp = find_pin(ctx, pin_register, pin)) != NULL)
+	    gp = *gpp;
+	else {
 	    if ((gp=init_pin(ctx, pin_register, pin)) == NULL)
 		goto error;
 	    if (gpio_set_direction(gp, gpio_direction_out) != GPIO_OK)
 		goto error;
 	}
-	else
-	    gp = *gpp;
 	if (gpio_set_state(gp, gpio_state_high) != GPIO_OK)
 	    goto error;
-
 	goto ok;
     }
 
      case CMD_CLR: {
-	gpio_pin_t** gpp;
-	gpio_pin_t* gp;
+	if (len != 2) goto badarg;
+	pin_register = get_uint8(buf);
+	pin = get_uint8(buf+1);
 
 	// Localise pin or init it
-	if ((gpp = find_pin(ctx, pin_register, pin)) == NULL) {
+	if ((gpp = find_pin(ctx, pin_register, pin)) != NULL)
+	    gp = *gpp;
+	else {
 	    if ((gp = init_pin(ctx, pin_register, pin)) == NULL)
 		goto error;
 	    if (gpio_set_direction(gp, gpio_direction_out) != GPIO_OK)
 		goto error;
 	}
-	else
-	    gp = *gpp;
 	if (gpio_set_state(gp, gpio_state_low) != GPIO_OK)
 	    goto error;
 	goto ok;
     }
 
-    case CMD_GET:
-    {
-	gpio_pin_t** gpp;
-	gpio_pin_t* gp;
+    case CMD_GET: {
 	uint8_t state;
 
+	if (len != 2) goto badarg;
+	pin_register = get_uint8(buf);
+	pin = get_uint8(buf+1);
+
 	// Localise pin or init it
-	if ((gpp = find_pin(ctx, pin_register, pin)) == NULL) {
+	if ((gpp = find_pin(ctx, pin_register, pin)) != NULL)
+	    gp = *gpp;
+	else {
 	    if ((gp=init_pin(ctx, pin_register, pin)) == NULL)
 		goto error;
+	    if (gpio_set_direction(gp, gpio_direction_in) != GPIO_OK)
+		goto error;
 	}
-	else 
-	    gp = *gpp;
 	lseek(gp->value_fd, 0, SEEK_SET);
 	if (read(gp->value_fd, &state, 1) != 1)
 	    goto error;
@@ -647,56 +650,42 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	return ctl_reply(1, &state, 1, rbuf, rsize);
     }
 
-    case CMD_INPUT:
-    {
-	gpio_pin_t** gpp;
-	gpio_pin_t* gp;
+    case CMD_SET_DIRECTION: {
+	uint8_t dir;
+	if (len != 3) goto badarg;
+	pin_register = get_uint8(buf);
+	pin = get_uint8(buf+1);
+	dir = get_uint8(buf+2);
 
 	// Localise pin or init it
-	if ((gpp = find_pin(ctx, pin_register, pin)) == NULL) {
+	if ((gpp = find_pin(ctx, pin_register, pin)) != NULL) 
+	    gp = *gpp;
+	else {
 	    if ((gp=init_pin(ctx, pin_register, pin)) == NULL)
 		goto error;
 	}
-	else
-	    gp = *gpp;
-	if (gpio_set_direction(gp, gpio_direction_in) != GPIO_OK)
+	if (gpio_set_direction(gp, (gpio_direction_t) dir) != GPIO_OK)
 	    goto error;
 	goto ok;
     }
 
-    case CMD_OUTPUT:
+    case CMD_GET_DIRECTION:
     {
-	gpio_pin_t** gpp;
-	gpio_pin_t* gp;
-
+	uint8_t dir;
+	if (len != 2) goto badarg;
+	pin_register = get_uint8(buf);
+	pin = get_uint8(buf+1);
 	// Localise pin or init it
-	if ((gpp = find_pin(ctx, pin_register, pin)) == NULL) {
-	    if ((gp=init_pin(ctx, pin_register, pin)) == NULL)
-		goto error;
-	}
-	else
+	if ((gpp = find_pin(ctx, pin_register, pin)) != NULL)
 	    gp = *gpp;
-	if (gpio_set_direction(gp, gpio_direction_out) != GPIO_OK)
-	    goto error;
-	goto ok;
-    }
-
-    case CMD_DIRECTION:
-    {
-	gpio_pin_t** gpp;
-	gpio_pin_t* gp;
-	uint8_t direction;
-
-	// Localise pin or init it
-	if ((gpp = find_pin(ctx, pin_register, pin)) == NULL) {
+	else {
 	    if ((gp=init_pin(ctx, pin_register, pin)) == NULL)
 		goto error;
 	}
-	gp = *gpp;
-	direction = (uint8_t) gp->direction;
+	dir = (uint8_t) gp->direction;
 	DEBUGF("Read direction %d for pin %d:%d", 
-	       direction, pin_register, pin);
-	return ctl_reply(1, &direction, sizeof(direction), rbuf, rsize);
+	       dir, pin_register, pin);
+	return ctl_reply(1, &dir, sizeof(dir), rbuf, rsize);
     }
 
   default:

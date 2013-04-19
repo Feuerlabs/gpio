@@ -28,7 +28,8 @@
 	 get/1,
 	 input/1,
 	 output/1,
-	 dir/1]).
+	 set_direction/2,
+	 get_direction/1]).
 
 %% Extended api
 %%-export([set_pin/2]).
@@ -43,12 +44,16 @@
 -define (CMD_SET, 2).
 -define (CMD_CLR, 3).
 -define (CMD_GET, 4).
--define (CMD_INPUT, 5).
--define (CMD_OUTPUT, 6).
+-define (CMD_SET_DIRECTION, 5).
+-define (CMD_GET_DIRECTION, 6).
 -define (CMD_SET_MASK, 7).
 -define (CMD_CLR_MASK, 8).
--define (CMD_DIRECTION, 9).
--define (CMD_RELEASE, 10).
+-define (CMD_RELEASE, 9).
+
+-define(DIR_IN, 1).
+-define(DIR_OUT, 2).
+-define(DIR_LOW, 3).
+-define(DIR_HIGH, 4).
 
 %%====================================================================
 %% API
@@ -113,9 +118,8 @@ get(Pin)
 %%--------------------------------------------------------------------
 -spec gpio:input(Pin::unsigned()) -> ok | {error,Reason::posix()}.
 
-input(Pin) 
-  when is_integer(Pin), Pin >= 0 ->
-    call(?GPIO_PORT, ?CMD_INPUT, <<0:8, Pin:8>>).
+input(Pin) ->
+    set_direction(Pin,in).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -124,20 +128,37 @@ input(Pin)
 %%--------------------------------------------------------------------
 -spec gpio:output(Pin::unsigned()) -> ok | {error,Reason::posix()}.
 
-output(Pin) 
-  when is_integer(Pin), Pin >= 0 ->
-    call(?GPIO_PORT, ?CMD_OUTPUT, <<0:8, Pin:8>>).
+output(Pin) ->
+    set_direction(Pin,out).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Sets direction for pin in pin register 0.
+%% @end
+%%--------------------------------------------------------------------
+-spec gpio:set_direction(Pin::unsigned(),
+			 Dir::in | out | high | low) ->
+				ok | {error,Reason::posix()}.
+
+set_direction(Pin,in) when is_integer(Pin), Pin >= 0 ->
+    call(?GPIO_PORT, ?CMD_SET_DIRECTION, <<0:8,Pin:8,?DIR_IN>>);
+set_direction(Pin,out) when is_integer(Pin), Pin >= 0 ->
+    call(?GPIO_PORT, ?CMD_SET_DIRECTION, <<0:8,Pin:8,?DIR_OUT>>);
+set_direction(Pin,high) when is_integer(Pin), Pin >= 0 ->
+    call(?GPIO_PORT, ?CMD_SET_DIRECTION, <<0:8,Pin:8,?DIR_HIGH>>);
+set_direction(Pin,low) when is_integer(Pin), Pin >= 0 ->
+    call(?GPIO_PORT, ?CMD_SET_DIRECTION, <<0:8,Pin:8,?DIR_LOW>>).
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Gets direction for pin in pin register 0.
 %% @end
 %%--------------------------------------------------------------------
--spec gpio:dir(Pin::unsigned()) -> ok | {error,Reason::posix()}.
+-spec gpio:get_direction(Pin::unsigned()) -> ok | {error,Reason::posix()}.
 
-dir(Pin) 
+get_direction(Pin) 
   when is_integer(Pin), Pin >= 0 ->
-    call(?GPIO_PORT, ?CMD_DIRECTION, <<0:8, Pin:8>>).
+    call(?GPIO_PORT, ?CMD_GET_DIRECTION, <<0:8, Pin:8>>).
 
 %% extended api
 
