@@ -777,8 +777,10 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 		goto badarg;
 	    evd.events = POLLPRI | POLLERR;
 	    evd.revents = 0;
-	    if (driver_event(ctx->port, gp->fd, &evd) < 0)
+	    if (driver_event(ctx->port, gp->fd, &evd) < 0) {
 		gpio_errno = errno;
+		goto error;
+	    }
 	    gp->interrupt = intval;
 	    gp->target = driver_caller(ctx->port);
 	    goto ok;
@@ -850,11 +852,14 @@ static void gpio_drv_event(ErlDrvData d, ErlDrvEvent e,
     gpio_pin_t* gp = ctx->first;
     uint8_t state;
 
-    DEBUGF("gpio_drv: event called");
+    DEBUGF("gpio_drv: event called fd=%d", INT_EVENT(e));
+
     while(gp && (gp->fd != e))
 	gp = gp->next;
-    if (!gp)
+    if (!gp) {
+	DEBUGF("gpio_drv: event not found");
 	return;
+    }
     // does this reset the interrupt?
     lseek(INT_EVENT(gp->fd), 0, SEEK_SET);
     if (read(INT_EVENT(gp->fd), &state, 1) != 1) {
