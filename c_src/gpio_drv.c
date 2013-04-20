@@ -23,8 +23,14 @@
 #include <fcntl.h>
 #include <string.h>
 
+#if USE_EPOLL 
+#define MAX_EPOLL_EVENTS 64 
+// if driver_event is not working, maybe kernel events was enabled?
+#include <sys/epoll.h>
+#endif
+
 #include "erl_driver.h"
-// #include "dthread.h"
+
 
 #define ATOM(NAME) am_ ## NAME
 #define INIT_ATOM(NAME) am_ ## NAME = driver_mk_atom(#NAME)
@@ -94,7 +100,7 @@ typedef struct _gpio_ctx_t
 {
     ErlDrvPort port;
     gpio_pin_t *first;
-
+    ErlDrvEvent epollfd;
 } gpio_ctx_t;
 
 //--------------------------------------------------------------------
@@ -351,6 +357,100 @@ static int write_value(char* fpath, int pin, char* value)
     return GPIO_OK;
 }
 
+static int add_interrupt(gpio_ctx_t* ctx, gpio_pin_t* gp)
+{
+    struct erl_drv_event_data evd;
+
+#ifdef USE_EPOLL
+    if (INT_EVENT(ctx->epollfd) >= 0) {
+	struct epoll_event ev;
+	
+	ev.events  = EPOLLPRI | EPOLLERR;
+	ev.data.ptr = (void) gp;
+	
+	if (epoll_ctl(INT_EVENT(epollfd), EPOLL_CTL_ADD, INT_EVENT(gp->fd),
+		      &ev) < 0) {
+	    gpio_errno = errno;
+	    DEBUGF("Failed epoll_ctl add (%d) reason, %s",
+		   INT_EVENT(gp->fd), strerror(errno));
+	    return GPIO_NOK;
+	}
+	return GPIO_OK;
+    }
+#endif
+    // fallback - that may work
+    evd.events = POLLPRI | POLLERR;
+    evd.revents = 0;
+    if (driver_event(ctx->port, gp->fd, &evd) < 0) {
+	gpio_errno = errno;
+	return GPIO_NOK;
+    }
+    return GPIO_OK;
+}
+
+static int del_interrupt(gpio_ctx_t* ctx, gpio_pin_t* gp)
+{
+    struct erl_drv_event_data evd;
+
+#ifdef USE_EPOLL
+    if (INT_EVENT(ctx->epollfd) >= 0) {
+	struct epoll_event ev;
+	
+	ev.events  = 0;
+	ev.data.fd = INT_EVENT(gp->fd);
+	
+	if (epoll_ctl(INT_EVENT(epollfd), EPOLL_CTL_DEL, INT_EVENT(gp->fd),
+		      &ev) < 0) {
+	    gpio_errno = errno;
+	    DEBUGF("Failed epoll_ctl del (%d) reason, %s",
+		   INT_EVENT(gp->fd), strerror(errno));
+	    return GPIO_NOK;
+	}
+	return GPIO_OK;
+    }
+#endif
+    // fallback - that may work
+    evd.events  = 0;
+    evd.revents = 0;
+    if (driver_event(ctx->port, gp->fd, &evd) < 0) {
+	gpio_errno = errno;
+	return GPIO_NOK;
+    }
+    return GPIO_OK;
+}
+
+static int send_interrupt(gpio_ctx_t* ctx, gpio_pin_t* gp)
+{
+    ErlDrvTermData message[16];
+    int i = 0;
+    uint8_t state;
+    
+    // does this reset the interrupt?
+    lseek(INT_EVENT(gp->fd), 0, SEEK_SET);
+    if (read(INT_EVENT(gp->fd), &state, 1) != 1) {
+	gpio_errno = errno;
+	state = '?';
+	goto error;
+    }
+    state -= '0';
+    if (state > 1) {
+	gpio_errno = EINVAL;
+	goto error;
+    }
+    // {gpio_interrupt, <reg>, <pin>, <value>}
+    push_atom(ATOM(gpio_interrupt));
+    push_int(gp->pin_register);
+    push_int(gp->pin);
+    push_int(state);
+    push_tuple(4);
+    driver_send_term(ctx->port, gp->target, message, i); 
+    return 0;
+error:
+    DEBUGF("send_interrupt read error %c for pin %d:%d", 
+	   (char)state, gp->pin_register, gp->pin);
+    return -1;
+}
+
 //--------------------------------------------------------------------
 // Check if pin is already exported
 // 
@@ -418,6 +518,7 @@ static int open_value_file(int pin)
         DEBUGF("Failed to open %s: %s", path, strerror(errno));
     }
     else {
+	gpio_errno = errno;
 	DEBUGF("Value file %s has fd %d", path, fd);
     }
     return fd; 
@@ -568,7 +669,19 @@ static ErlDrvData gpio_drv_start(ErlDrvPort port, char* command)
 
     ctx->port = port;
     ctx->first = NULL;
-
+    ctx->epollfd = (ErlDrvEvent) -1;
+#ifdef USE_EPOLL
+    {
+	ctx->epollfd = (ErlDrvEvent) epoll_create(MAX_EPOLL_EVENTS);
+	if (INT_EVENT(ctx->epollfd) < 0) {
+	    DEBUGF("Failed epoll_create (%d) reason, %s", MAX_EPOLL_EVENTS,
+		   strerror(errno));
+	}
+	else {
+	    driver_select(ctx->port, ctx->epollfd, ERL_DRV_READ, 1);
+	}
+    }
+#endif
     DEBUGF("gpio_drv: start (%s)", command);
 #ifdef PORT_CONTROL_BINARY
     set_port_control_flags(port, PORT_CONTROL_FLAG_BINARY);
@@ -583,16 +696,17 @@ static void gpio_drv_stop(ErlDrvData d)
     while(gp) {
 	gpio_pin_t* gpn = gp->next;
 	if (gp->interrupt) {
-	    struct erl_drv_event_data evd;
-	    evd.events  = 0;
-	    evd.revents = 0;
-	    driver_event(ctx->port, gp->fd, &evd);
+	    del_interrupt(ctx, gp);
 	    gp->interrupt = 0;
 	}
 	driver_select(ctx->port, gp->fd, ERL_DRV_USE, 0);
 	driver_free(gp);
 	gp = gpn;
     }    // add structure cleanup here
+#ifdef USE_EPOLL
+    if (INT_EVENT(ctx->epollfd) >= 0)
+	driver_select(ctx->port, INT_EVENT(ctx->epollfd), ERL_DRV_USE, 0);
+#endif
     driver_free(ctx);
 }
 
@@ -747,7 +861,6 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
     }
 
     case CMD_SET_INTERRUPT: {
-	struct erl_drv_event_data evd;
 	gpio_interrupt_t intval;
 
 	if (len != 3) goto badarg;
@@ -766,21 +879,15 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	    goto error;
 	if (intval == gpio_interrupt_none) {
 	    if (gp->interrupt) {
-		evd.events = 0;
-		evd.revents = 0;
-		driver_event(ctx->port,gp->fd,&evd);
-		gp->interrupt = 0;
+		del_interrupt(ctx, gp);
+		gp->interrupt = gpio_interrupt_none;
 	    }
 	}
 	else {
 	    if (gp->direction != gpio_direction_in)
 		goto badarg;
-	    evd.events = POLLPRI | POLLERR;
-	    evd.revents = 0;
-	    if (driver_event(ctx->port, gp->fd, &evd) < 0) {
-		gpio_errno = errno;
+	    if (add_interrupt(ctx, gp) == GPIO_NOK)
 		goto error;
-	    }
 	    gp->interrupt = intval;
 	    gp->target = driver_caller(ctx->port);
 	    goto ok;
@@ -850,7 +957,6 @@ static void gpio_drv_event(ErlDrvData d, ErlDrvEvent e,
 {
     gpio_ctx_t* ctx = (gpio_ctx_t*) d;
     gpio_pin_t* gp = ctx->first;
-    uint8_t state;
 
     DEBUGF("gpio_drv: event called fd=%d", INT_EVENT(e));
 
@@ -860,42 +966,35 @@ static void gpio_drv_event(ErlDrvData d, ErlDrvEvent e,
 	DEBUGF("gpio_drv: event not found");
 	return;
     }
-    // does this reset the interrupt?
-    lseek(INT_EVENT(gp->fd), 0, SEEK_SET);
-    if (read(INT_EVENT(gp->fd), &state, 1) != 1) {
-	state = '?';
-	goto error;
-    }
-    state -= '0';
-    if (state > 1)
-	goto error;
     if (ed->revents & POLLERR)
 	goto error;
-    if (ed->revents & POLLPRI) {
-	ErlDrvTermData message[16];
-	int i = 0;
-	// {gpio_interrupt, <reg>, <pin>, <value>}
-	push_atom(ATOM(gpio_interrupt));
-	push_int(gp->pin_register);
-	push_int(gp->pin);
-	push_int(state);
-	push_tuple(4);
-	driver_send_term(ctx->port, gp->target, message, i); 
-    }
+    if (ed->revents & POLLPRI)
+	send_interrupt(ctx, gp);
     return;
 error:
-    DEBUGF("interrupt read error %c (revents=%x) for pin %d:%d", 
-	   (char)state, ed->revents, gp->pin_register, gp->pin);
+    DEBUGF("gpio_drv_event read error (revents=%x) for pin %d:%d", 
+	   ed->revents, gp->pin_register, gp->pin);
 }
 
 //--------------------------------------------------------------------
 //--------------------------------------------------------------------
 static void gpio_drv_ready_input(ErlDrvData d, ErlDrvEvent e)
 {
-    (void) d;
-    (void) e;
-//  gpio_ctx_t* ctx = (gpio_ctx_t*) d;
+#ifdef USE_EPOLL    
+    gpio_ctx_t* ctx = (gpio_ctx_t*) d;
     DEBUGF("gpio_drv: ready_input called");
+    if (ctx->epollfd == e) {
+	struct epoll_event events[MAX_EPOLL_EVENTS];
+	int i,n;
+	n = epoll_wait(INT_EVENT(ctx->epollfd), events, MAX_EPOLL_EVENTS, 0);
+	for (i = 0; i < n; i++) {
+	    if (events[i].events & EPOLLPRI)
+		send_interrupt(ctx, (gpio_pin_t*) events[i].data.ptr);
+	}
+#else
+	(void) d;
+	(void) e;
+#endif
 }
 
 //--------------------------------------------------------------------
