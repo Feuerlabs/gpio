@@ -40,8 +40,11 @@
 	 set_mask/2,
 	 clr_mask/2]).
 
-%% Port commands
+%% Turn on/off debug
+-export([debug/1]).
+
 %% MUST BE EQUAL TO DEFINES IN gpio_drv.c !!!!
+%% Port commands
 -define (CMD_INIT,1).
 -define (CMD_SET, 2).
 -define (CMD_CLR, 3).
@@ -53,16 +56,30 @@
 -define (CMD_RELEASE, 9).
 -define (CMD_SET_INTERRUPT, 10).
 -define (CMD_GET_INTERRUPT, 11).
+-define (CMD_DEBUG_LEVEL, 12).
 
+%% Directions
 -define(DIR_IN,      1).
 -define(DIR_OUT,     2).
 -define(DIR_LOW,     3).
 -define(DIR_HIGH,    4).
 
+%% Interrupt types
 -define(INT_NONE,    0).
 -define(INT_RISING,  1).
 -define(INT_FALLING, 2).
 -define(INT_BOTH,    3).
+
+%% Debug level
+-define(DLOG_DEBUG,     7).
+-define(DLOG_INFO,      6).
+-define(DLOG_NOTICE,    5).
+-define(DLOG_WARNING,   4).
+-define(DLOG_ERROR,     3).
+-define(DLOG_CRITICAL,  2).
+-define(DLOG_ALERT,     1).
+-define(DLOG_EMERGENCY, 0).
+-define(DLOG_NONE,     -1).
 
 %%====================================================================
 %% API
@@ -80,9 +97,7 @@ init(Pin)
 
 
 %%--------------------------------------------------------------------
-%% @doc
-%% Releases pin in pin register 0.
-%% @end
+%%@doc Releases pin in pin register 0.  @end
 %%--------------------------------------------------------------------
 -spec gpio:release(Pin::unsigned()) -> ok | {error,Reason::posix()}.
 release(Pin) 
@@ -217,13 +232,13 @@ get_interrupt(Pin)
 -spec gpio:set_mask(Mask::unsigned()) -> ok | {error,Reason::posix()}.
 set_mask(Mask) 
   when is_integer(Mask), Mask >= 0 ->
-    call(?GPIO_PORT, ?CMD_SET_MASK, <<0:8, Mask:8>>).
+    set_mask(0, Mask).
 
 %%--------------------------------------------------------------------
 -spec gpio:clr_mask(Mask::unsigned()) -> ok | {error,Reason::posix()}.
 clr_mask(Mask) 
   when is_integer(Mask), Mask >= 0 ->
-    call(?GPIO_PORT, ?CMD_CLR_MASK, <<0:8, Mask:32>>).
+    clr_mask(0, Mask).
 
 %%--------------------------------------------------------------------
 -spec gpio:set_mask(PinReg::unsigned(), Mask::unsigned()) ->
@@ -238,6 +253,44 @@ set_mask(PinReg, Mask)
 clr_mask(PinReg, Mask) 
   when is_integer(PinReg), PinReg >= 0, is_integer(Mask), Mask >= 0 ->
     call(?GPIO_PORT, ?CMD_CLR_MASK, <<PinReg:8, Mask:32>>).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Controls debug.
+%% @end
+%%--------------------------------------------------------------------
+-type level():: 
+	none |
+	info |
+	notice |
+	warning |
+	error |
+	critical |
+	alert |
+	emergency.
+
+-spec gpio:debug(Level::level()) -> ok | {error,Reason::posix()}.
+
+debug(none) ->
+    call(?GPIO_PORT, ?CMD_DEBUG_LEVEL, <<?DLOG_NONE:8>>);
+debug(debug) ->
+    call(?GPIO_PORT, ?CMD_DEBUG_LEVEL, <<?DLOG_DEBUG:8>>);
+debug(info) ->
+    call(?GPIO_PORT, ?CMD_DEBUG_LEVEL, <<?DLOG_INFO:8>>);
+debug(notice) ->
+    call(?GPIO_PORT, ?CMD_DEBUG_LEVEL, <<?DLOG_NOTICE:8>>);
+debug(warning) ->
+    call(?GPIO_PORT, ?CMD_DEBUG_LEVEL, <<?DLOG_WARNING:8>>);
+debug(error) ->
+    call(?GPIO_PORT, ?CMD_DEBUG_LEVEL, <<?DLOG_ERROR:8>>);
+debug(critical) ->
+    call(?GPIO_PORT, ?CMD_DEBUG_LEVEL, <<?DLOG_CRITICAL:8>>);
+debug(alert) ->
+    call(?GPIO_PORT, ?CMD_DEBUG_LEVEL, <<?DLOG_ALERT:8>>);
+debug(emergency) ->
+    call(?GPIO_PORT, ?CMD_DEBUG_LEVEL, <<?DLOG_EMERGENCY:8>>).
+
+
 
 %%--------------------------------------------------------------------
 %% Internal functions
