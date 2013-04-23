@@ -99,7 +99,16 @@ init(Options) ->
     case erl_ddll:load(code:priv_dir(gpio), ?GPIO_DRV) of
 	LoadRes when LoadRes =:= ok; 
 		     LoadRes =:= { error, already_loaded } ->
-	    Port = erlang:open_port({spawn_driver, ?GPIO_DRV},[binary]),
+	    Dbg = case proplists:get_value(debug, Options, false) of
+		     true -> " d";
+		     false -> ""
+		  end,
+	    AC = case proplists:get_value(no_auto_create, Options, false) of
+		     true -> " n";
+		     false -> ""
+		 end,
+	    Cmd = atom_to_list(?GPIO_DRV) ++ Dbg ++ AC,
+	    Port = erlang:open_port({spawn_driver, Cmd},[binary]),
 	    true = erlang:register(?GPIO_PORT, Port),
 	    {ok, #loop_data{ port=Port }};
 	{error, Reason} ->
