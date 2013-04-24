@@ -30,23 +30,34 @@
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(Args::list(term())) -> 
+-type option()::
+	no_auto_create |
+	debug |
+	chip_set.
+
+-spec start_link(Args::list({option(), Value::term()})) -> 
 			{ok, Pid::pid()} | 
 			ignore | 
 			{error, Error::term()}.
 
 start_link(Args) ->
-    ?ei("~p: start_link: args = ~p\n", [?MODULE, Args]),
-    try supervisor:start_link({local, ?MODULE}, ?MODULE, Args) of
+    ?ei("~p: start_link: args = ~p", [?MODULE, Args]),
+
+    F =	case proplists:get_value(linked,Args,true) of
+	    true -> start_link;
+	    false -> start
+	end,
+
+    try supervisor:F({local, ?MODULE}, ?MODULE, Args) of
 	{ok, Pid} ->
 	    {ok, Pid, {normal, Args}};
 	Error -> 
-	    ?ee("~p: start_link: Failed to start process, reason ~p\n",  
+	    ?ee("~p: start_link: Failed to start process, reason ~p",  
 		[?MODULE, Error]),
 	    Error
     catch 
 	error:Reason ->
-	    ?ee("~p: start_link: Try failed, reason ~p\n", 
+	    ?ee("~p: start_link: Try failed, reason ~p", 
 		[?MODULE,Reason]),
 	    Reason
     end.
@@ -60,19 +71,20 @@ start_link(Args) ->
 -spec stop(StartArgs::list(term())) -> ok | {error, Error::term()}.
 
 stop(_StartArgs) ->
-    exit(stopped).
+    ?ei("~p: stop.", [?MODULE]),
+    exit(normal).
 
 %% ===================================================================
 %% Supervisor callbacks
 %% ===================================================================
 %% @private
 init(Args) ->
-    ?ei("~p: init: args = ~p,\n pid = ~p\n", [?MODULE, Args, self()]),
+    ?ei("~p: init: args = ~p,\n pid = ~p", [?MODULE, Args, self()]),
     GpioServer = {?GPIO_SRV, 
 		  {?GPIO_SRV, start_link, [Args]}, 
 		  permanent, 5000, worker, [?GPIO_SRV]},
     Processes = [GpioServer],
-    ?ei("~p: About to start ~p\n", [?MODULE, Processes]),
+    ?dbg("~p: About to start ~p\n", [?MODULE, Processes]),
     {ok, { {one_for_one, 5, 10}, Processes} }.
 
 

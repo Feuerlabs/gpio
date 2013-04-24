@@ -81,7 +81,12 @@
 			{ok, Pid::pid()} | 
 			{error, Reason::atom()}.
 start_link(Args) ->
-    gen_server:start_link({local, ?GPIO_SRV}, ?MODULE, Args, []).
+    F =	case proplists:get_value(linked,Args,true) of
+	    true -> start_link;
+	    false -> start
+	end,
+
+    gen_server:F({local, ?GPIO_SRV}, ?MODULE, Args, []).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -107,7 +112,16 @@ init(Options) ->
 		     true -> " n";
 		     false -> ""
 		 end,
-	    Cmd = atom_to_list(?GPIO_DRV) ++ Dbg ++ AC,
+
+	    %% Add more chipsets when available
+	    CS = case proplists:get_value(chip_set, Options, false) of
+		     false -> "";
+		     bcm2835 -> " b";
+		     Other ->
+			 ?ei("Unknown chip set %p, ignored",[Other]),
+			 ""
+		 end,
+	    Cmd = atom_to_list(?GPIO_DRV) ++ Dbg ++ AC ++ CS,
 	    Port = erlang:open_port({spawn_driver, Cmd},[binary]),
 	    true = erlang:register(?GPIO_PORT, Port),
 	    {ok, #loop_data{ port=Port }};
