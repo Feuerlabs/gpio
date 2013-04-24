@@ -780,7 +780,7 @@ static int gpio_get_state(gpio_ctx_t* ctx,
 			  gpio_pin_t* gp,
 			  uint8_t* sp)
 {
-    DEBUGF("Get state for on pin %d:%d", gp->pin_reg, gp->pin);
+    DEBUGF("Get state for pin %d:%d", gp->pin_reg, gp->pin);
 
     if (gp->direct) 
 	return gpio_get_direct(ctx, gp, sp);
@@ -929,9 +929,6 @@ static int gpio_set_interrupt(gpio_pin_t* gp, gpio_interrupt_t interrupt)
     DEBUGF("set interrupt to %d on pin %d:%d", 
 	   interrupt, gp->pin_reg, gp->pin);
 
-    if (gp->direct) 
-	return GPIO_NOK;
-
     switch(interrupt) {
     case gpio_interrupt_none:   value = "none"; break;
     case gpio_interrupt_rising: value = "rising"; break;
@@ -1022,7 +1019,10 @@ static int send_interrupt(gpio_ctx_t* ctx, gpio_pin_t* gp)
     int i = 0;
     uint8_t state;
     
-    if (gpio_get_state(ctx, gp, &state) != GPIO_OK)
+    //if (gpio_get_state(ctx, gp, &state) != GPIO_OK)
+    //goto error;
+    // File must be read to stop interrupt from coming
+    if (gpio_get_indirect(gp, &state) != GPIO_OK)
 	goto error;
    
     // Format of info to activator
