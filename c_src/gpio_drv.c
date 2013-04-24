@@ -271,6 +271,12 @@ static inline uint8_t get_uint8(uint8_t* ptr)
     return value;
 }
 
+static inline int8_t get_int8(uint8_t* ptr)
+{
+    uint8_t value = (ptr[0]<<0);
+    return (int8_t) value;
+}
+
 static inline void put_uint16(uint8_t* ptr, uint16_t v)
 {
     ptr[0] = v>>8;
@@ -1385,14 +1391,21 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 
     case CMD_SET_DIRECTION: {
 	uint8_t dir;
+	gpio_pin_t* gp;
+
 	if (len != 3) goto badarg;
 	pin_reg = get_uint8(buf);
 	pin = get_uint8(buf+1);
 	dir = get_uint8(buf+2);
 
-	if ((gp = find_or_create_pin(ctx, pin_reg, pin, 
-				     (gpio_direction_t) dir)) == NULL) 
-	    goto error;
+	if ((gp=find_pin(ctx, pin_reg, pin, NULL)) == NULL) {
+	    if (!auto_create) 
+		goto badarg;
+	    if ((gp=init_pin(ctx, pin_reg, pin)) == NULL)
+		goto error;
+	}
+	if (gpio_set_direction(ctx, gp,  (gpio_direction_t) dir) != GPIO_OK)
+		goto error;
 	goto ok;
     }
 
@@ -1494,7 +1507,8 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	
     case CMD_DEBUG_LEVEL: {
 	if (len != 1) goto badarg;
-	debug_level = get_uint8(buf);
+	debug_level = get_int8(buf);
+	DEBUGF("Debug level set to %d", debug_level);
 	goto ok;
     }
 

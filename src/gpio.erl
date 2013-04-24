@@ -93,7 +93,7 @@
 -define(DLOG_CRITICAL,  2).
 -define(DLOG_ALERT,     1).
 -define(DLOG_EMERGENCY, 0).
--define(DLOG_NONE,     -1).
+-define(DLOG_NONE,      -1).
 
 %%====================================================================
 %% API
