@@ -342,11 +342,11 @@ static gpio_pin_t* find_pin(gpio_ctx_t* ctx,
 
     // If register 0 or 1 use predefined arrays
     // otherwise look in linked list
-    if (pin_reg == 0 && pin < 32) {
+    if ((pin_reg == 0) && (pin < 32)) {
 	if (gppp) *gppp = &ctx->reg0[pin];
 	return ctx->reg0[pin];
     }
-    else if (pin_reg == 1&& pin < 32) {
+    else if ((pin_reg == 1) && (pin < 32)) {
 	if (gppp) *gppp = &ctx->reg1[pin];
 	return ctx->reg1[pin];
     }
@@ -581,7 +581,7 @@ static int gpio_set_mode_direct(gpio_ctx_t* ctx,
 	   gp->pin_reg, gp->pin, direction);
 
     if (direction == gpio_direction_in) mode = GPIO_MODE_IN;
-    else  mode = GPIO_MODE_OUT;
+    else mode = GPIO_MODE_OUT;
 
     if (gp->pin_reg == 0)
 	index = GPIO_FSEL0 + gp->pin/10;
@@ -642,9 +642,9 @@ static gpio_pin_t* find_or_create_pin(gpio_ctx_t* ctx,
 	// We should create it
 	if ((gp=init_pin(ctx, pin_reg, pin)) == NULL)
 	    return NULL;
+	if (gpio_set_direction(ctx, gp, direction) != GPIO_OK)
+	    return NULL;
     }
-    if (gpio_set_direction(ctx, gp, direction) != GPIO_OK)
-	return NULL;
     return gp;
 }
 
@@ -693,16 +693,24 @@ static int gpio_set_direct(gpio_ctx_t* ctx,
 {
     // Set register with mask where pin is turned on
     if (gp->pin_reg == 0) {
-	if (gpio_state_high)
+	if (state == gpio_state_high) {
+	    DEBUGF("Writing to SET0");
 	    ctx->gpio_reg[GPIO_SET0] = 1 << gp->pin;
-	else
+	}
+	else {
+	    DEBUGF("Writing to CLR0");
 	    ctx->gpio_reg[GPIO_CLR0] = 1 << gp->pin;
+	}
     }
     else if (gp->pin_reg == 1) {
-	if (gpio_state_high)
+	if (state == gpio_state_high){
+	    DEBUGF("Writing to SET1");
 	    ctx->gpio_reg[GPIO_SET1] = 1 << gp->pin;
-	else
+	}
+	else{
+	    DEBUGF("Writing to CLR1");
 	    ctx->gpio_reg[GPIO_CLR1] = 1 << gp->pin;
+	}
     }
 
     return GPIO_OK;
