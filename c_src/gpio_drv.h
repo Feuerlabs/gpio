@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 #include <stdarg.h>
+#include <unistd.h>
 
 #define GPIO_NOK -1
 #define GPIO_OK 0
