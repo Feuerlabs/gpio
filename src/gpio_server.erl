@@ -82,7 +82,7 @@ init(Options) ->
 		 end,
 
 	    %% Add more chipsets when available
-	    CS = case proplists:get_value(chip_set, Options, false) of
+	    CS = case proplists:get_value(chipset, Options, false) of
 		     false -> "";
 		     bcm2835 -> " b";
 		     Other ->

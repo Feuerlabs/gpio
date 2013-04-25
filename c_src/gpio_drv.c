@@ -1363,8 +1363,8 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 		goto error;
 	    gp->interrupt = intval;
 	    gp->target = driver_caller(ctx->port);
-	    goto ok;
 	}
+	goto ok;
     }
 
     case CMD_GET_INTERRUPT: {
@@ -1387,13 +1387,13 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	if (len != 1) goto badarg;
 	gpio_debug_level = get_int8(buf);
 	DEBUGF("Debug level set to %d", gpio_debug_level);
-	goto ok;
+	goto oki;
     }
 
     case CMD_DUMP: {
 	if (len != 0) goto badarg;
 	dump(ctx);
-	goto ok;
+	goto oki;
     }
 
     default:
@@ -1402,6 +1402,7 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 
 ok:
     DEBUGF("Successfully executed %d on pin %d:%d", cmd, pin_reg, pin);
+oki:
     return ctl_reply(0, NULL, 0, rbuf, rsize);
 badarg:
     gpio_errno = EINVAL;
