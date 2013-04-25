@@ -34,42 +34,10 @@
          terminate/2, 
 	 code_change/3]).
 
-%% Loop data record.
--record(pin, {
-	  pin_register::unsigned(),
-	  pin::unsigned(), 
-	  subs = []::list(), 
-	  active = false::boolean()
-	 }).
--record(loop_data, {
-	  port, 
-	  auto_export = true::boolean(),
-	  pin_list = []::list(#pin{})
-	 }).
-
-%%
-%% Bitmasks used when interface port driver.
-%%
--define (GPIODRV_CMD_MASK, 16#0000000F).
--define (GPIODRV_CMD_OPEN_FOR_INPUT,16#00000001).
--define (GPIODRV_CMD_OPEN_FOR_OUTPUT, 16#00000002).
--define (GPIODRV_CMD_OPEN_FOR_BIDIRECTIONAL, 16#00000003).
--define (GPIODRV_CMD_SET_STATE, 16#00000004).
--define (GPIODRV_CMD_GET_STATE, 16#00000005).
--define (GPIODRV_CMD_CLOSE, 16#00000006).
--define (GPIODRV_CMD_GET_DEFAULT_STATE, 16#00000007).
-
--define (GPIODRV_CMD_ARG_MASK, 16#000000F0).
--define (GPIODRV_CMD_ARG_LOW, 16#00000010).
--define (GPIODRV_CMD_ARG_HIGH, 16#00000020).
-
--define (GPIODRV_RES_OK, <<0:8>>).
--define (GPIODRV_RES_LOW, <<1:8>>).
--define (GPIODRV_RES_HIGH, <<2:8>>).
--define (GPIODRV_RES_ILLEGAL_ARG, <<3:8>>).
--define (GPIODRV_RES_IO_ERROR, <<4:8>>).
--define (GPIODRV_RES_INCORRECT_STATE, <<5:8>>).
-
+-record(state,
+	{
+	  port
+	}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -96,7 +64,7 @@ start_link(Args) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec init(Args::list()) -> 
-		  {ok, LD::#loop_data{}} |
+		  {ok, State::#state{}} |
 		  {stop, Reason::atom()}.
 init(Options) ->
     ?dbg("init: options ~p", [Options]),
@@ -124,7 +92,7 @@ init(Options) ->
 	    Cmd = atom_to_list(?GPIO_DRV) ++ Dbg ++ AC ++ CS,
 	    Port = erlang:open_port({spawn_driver, Cmd},[binary]),
 	    true = erlang:register(?GPIO_PORT, Port),
-	    {ok, #loop_data{ port=Port }};
+	    {ok, #state{ port=Port }};
 	{error, Reason} ->
 	    ?ee("gpio: Failed loading driver, reason ~p", [Reason]),
 	    {stop, no_driver}
@@ -141,19 +109,19 @@ init(Options) ->
 	stop.
 
 -spec handle_call(Request::call_request(),
-		  From::{pid(), term()}, LD::#loop_data{}) ->
-			 {reply, Reply::term(), LD::#loop_data{}} |
-			 {noreply, LD::#loop_data{}} |
-			 {stop, Reason::term(), Reply::term(), LD::#loop_data{}}.
+		  From::{pid(), term()}, State::#state{}) ->
+			 {reply, Reply::term(), State::#state{}} |
+			 {noreply, State::#state{}} |
+			 {stop, Reason::term(), Reply::term(), State::#state{}}.
 
 
 
-handle_call(stop, _From, LD) ->
-    {stop, normal, ok, LD};
+handle_call(stop, _From, State) ->
+    {stop, normal, ok, State};
 
-handle_call(_Request, _From, LD) ->
+handle_call(_Request, _From, State) ->
     ?dbg("handle_call: unknown request ~p", [ _Request]),
-    {reply, {error, bad_call}, LD}.
+    {reply, {error, bad_call}, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -162,14 +130,14 @@ handle_call(_Request, _From, LD) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec handle_cast(Msg::term(), LD::#loop_data{}) -> 
-			 {noreply, LD::#loop_data{}} |
-			 {noreply, LD::#loop_data{}, Timeout::timeout()} |
-			 {stop, Reason::term(), LD::#loop_data{}}.
+-spec handle_cast(Msg::term(), State::#state{}) -> 
+			 {noreply, State::#state{}} |
+			 {noreply, State::#state{}, Timeout::timeout()} |
+			 {stop, Reason::term(), State::#state{}}.
 
-handle_cast(_Msg, LD) ->
+handle_cast(_Msg, State) ->
     ?dbg("handle_cast: unknown msg ~p", [_Msg]),
-    {noreply, LD}.
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -182,12 +150,12 @@ handle_cast(_Msg, LD) ->
 	{Port::unsigned(), {data, [BinPinValue::unsigned()]}} |
 	{'EXIT', Pid::pid(), Reason::term()}. 
 
--spec handle_info(Info::info(), LD::#loop_data{}) -> 
-			 {noreply, LD::#loop_data{}}.
+-spec handle_info(Info::info(), State::#state{}) -> 
+			 {noreply, State::#state{}}.
 
-handle_info(_Info, LD) ->
+handle_info(_Info, State) ->
     ?dbg("handle_info: unknown info ~p", [_Info]),
-    {noreply, LD}.
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -196,12 +164,12 @@ handle_info(_Info, LD) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec code_change(OldVsn::term(), LD::#loop_data{}, Extra::term()) -> 
-			 {ok, NewLD::#loop_data{}}.
+-spec code_change(OldVsn::term(), State::#state{}, Extra::term()) -> 
+			 {ok, NewState::#state{}}.
 
-code_change(_OldVsn, LD, _Extra) ->
+code_change(_OldVsn, State, _Extra) ->
     ?dbg("code_change: Old version ~p", [_OldVsn]),
-    {ok, LD}.
+    {ok, State}.
 
 
 %%--------------------------------------------------------------------
@@ -212,41 +180,16 @@ code_change(_OldVsn, LD, _Extra) ->
 %% necessary cleaning up. When it returns, the gen_server terminates
 %% with Reason. The return value is ignored.
 %%
-%% @spec terminate(Reason, LD) -> void()
+%% @spec terminate(Reason, State) -> void()
 %% @end
 %%--------------------------------------------------------------------
--spec terminate(Reason::term(), LD::#loop_data{}) -> 
+-spec terminate(Reason::term(), State::#state{}) -> 
 		       no_return().
 
-terminate(_Reason, _LD) ->
+terminate(_Reason, _State) ->
     ?dbg("terminate: reason ~p", [_Reason]),
     ok.
 
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
-convert_to_bits(output) -> ?GPIODRV_CMD_OPEN_FOR_OUTPUT;
-convert_to_bits(input) -> ?GPIODRV_CMD_OPEN_FOR_INPUT;
-convert_to_bits(bidirectional) -> ?GPIODRV_CMD_OPEN_FOR_BIDIRECTIONAL;
-convert_to_bits(close) -> ?GPIODRV_CMD_CLOSE;
-convert_to_bits(set_state) -> ?GPIODRV_CMD_SET_STATE;
-convert_to_bits(get_state) -> ?GPIODRV_CMD_GET_STATE;
-convert_to_bits(high) -> ?GPIODRV_CMD_ARG_HIGH;
-convert_to_bits(low) -> ?GPIODRV_CMD_ARG_LOW.
-
-convert_return_value(Bits) ->
-    if Bits =:= ?GPIODRV_RES_OK -> ok;
-       Bits =:= ?GPIODRV_RES_HIGH -> high;
-       Bits =:= ?GPIODRV_RES_LOW -> low;
-       Bits =:= ?GPIODRV_RES_ILLEGAL_ARG -> illegal_arg;
-       Bits =:= ?GPIODRV_RES_IO_ERROR -> io_error;
-       Bits =:= ?GPIODRV_RES_INCORRECT_STATE -> incorrect_state;
-       true -> unknown_error
-    end.
-
-get_inverse_state(low) -> high;
-get_inverse_state(high) -> low.
-
-
-
-

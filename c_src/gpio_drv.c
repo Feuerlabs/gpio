@@ -191,6 +191,9 @@ DECL_ATOM(error);
 DECL_ATOM(undefined);
 DECL_ATOM(gpio_interrupt);
 
+static int del_interrupt(gpio_ctx_t* ctx, gpio_pin_t* gp);
+static int add_interrupt(gpio_ctx_t* ctx, gpio_pin_t* gp);
+
 static ErlDrvEntry gpio_drv_entry;
 static bool auto_create = true; // If true pins are created when needed
 
@@ -533,10 +536,7 @@ static int release_pin(gpio_ctx_t* ctx, int pin_reg, int pin)
     if ((gp=find_pin(ctx, pin_reg, pin, &gpp)) == NULL)
 	return GPIO_OK; // or badarg ???
     if (gp->interrupt) {
-	struct erl_drv_event_data evd;
-	evd.events  = 0;
-	evd.revents = 0;
-	driver_event(ctx->port, gp->fd, &evd);
+	del_interrupt(ctx, gp);
 	gp->interrupt = 0;
     }
     // async close the file
@@ -863,7 +863,7 @@ static int gpio_set_mask_on_reg(gpio_ctx_t* ctx,
     if (pin_reg == 0) {
 	direct_mask = mask & ctx->reg0_direct_pins;
 	DEBUGF("Set direct mask 0x%x on register %d", direct_mask, pin_reg);
-	if (gpio_state_high)
+	if (state == gpio_state_high)
 	    ctx->gpio_reg[GPIO_SET0] = direct_mask;
 	else
 	    ctx->gpio_reg[GPIO_CLR0] = direct_mask;
@@ -873,7 +873,7 @@ static int gpio_set_mask_on_reg(gpio_ctx_t* ctx,
     else if (pin_reg == 1) {
 	direct_mask = mask & ctx->reg1_direct_pins;
 	DEBUGF("Set direct mask 0x%x on register %d", direct_mask, pin_reg);
-	if (gpio_state_high)
+	if (state == gpio_state_high)
 	    ctx->gpio_reg[GPIO_SET1] = direct_mask = mask;
 	else
 	    ctx->gpio_reg[GPIO_CLR1] = mask & ctx->reg1_direct_pins;
