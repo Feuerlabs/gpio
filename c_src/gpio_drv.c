@@ -1359,8 +1359,10 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	else {
 	    if (gp->direction != gpio_direction_in)
 		goto badarg;
-	    if (add_interrupt(ctx, gp) == GPIO_NOK)
-		goto error;
+	    if (gp->interrupt != gpio_interrupt_none) {
+		if (add_interrupt(ctx, gp) == GPIO_NOK)
+		    goto error;
+	    }
 	    gp->interrupt = intval;
 	    gp->target = driver_caller(ctx->port);
 	}
