@@ -14,8 +14,12 @@
 -include("gpio.hrl").
 
 %% Application callbacks
--export([start/2, 
+-export([start/2,
 	 stop/1]).
+
+%% Shortcut API
+-export([start/0,
+	 start/1]).
 
 %% ===================================================================
 %% Application callbacks
@@ -56,3 +60,10 @@ start(_StartType, _StartArgs) ->
 
 stop(_State) ->
     ok.
+
+%% @private
+start() ->
+    start(normal, []).
+
+start(Opts) ->
+    gpio_sup:start_link(Opts).
