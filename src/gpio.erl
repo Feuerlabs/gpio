@@ -38,9 +38,13 @@
 	 output/1,
 	 output/2,
 	 set_direction/2,
+	 set_direction/3,
 	 get_direction/1,
+	 get_direction/2,
 	 set_interrupt/2,
-	 get_interrupt/1]).
+	 set_interrupt/3,
+	 get_interrupt/1,
+	 get_interrupt/2]).
 
 %% Mask api, addressing several pins at once
 -export([set_mask/1,
