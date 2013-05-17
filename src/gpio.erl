@@ -50,7 +50,10 @@
 -export([set_mask/1,
 	 clr_mask/1,
 	 set_mask/2,
-	 clr_mask/2]).
+	 clr_mask/2,
+	 get_mask/1,
+	 get_mask/2]).
+
 
 %% Testing
 -export([debug/1,
@@ -71,6 +74,7 @@
 -define (CMD_GET_INTERRUPT, 11).
 -define (CMD_DEBUG_LEVEL, 12).
 -define (CMD_DUMP, 13).
+-define (CMD_GET_MASK, 14).
 
 %% Directions
 -define(DIR_IN,      1).
@@ -444,6 +448,31 @@ set_mask(PinReg, Mask)
 clr_mask(PinReg, Mask) 
   when is_integer(PinReg), PinReg >= 0, is_integer(Mask), Mask >= 0 ->
     call(?GPIO_PORT, ?CMD_CLR_MASK, <<PinReg:8, Mask:32>>).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Read pins in mask in pin register 0
+%% @end
+%%--------------------------------------------------------------------
+-spec get_mask(PinReg::unsigned()) -> 
+		      {ok,Value::unsigned()} | {error,Reason::posix()}.
+
+get_mask(Mask) when 
+      is_integer(Mask), Mask >= 0 ->
+    get_mask(0, Mask).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Read pins in mask in pin register.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_mask(PinReg::unsigned(), Mask::unsigned()) -> 
+		      {ok,Value::unsigned()} | {error,Reason::posix()}.
+
+get_mask(PinReg, Mask) 
+  when is_integer(PinReg), PinReg >= 0, is_integer(Mask), Mask >= 0 ->
+    call(?GPIO_PORT, ?CMD_GET_MASK, <<PinReg:8, Mask:32>>).
 
 %%--------------------------------------------------------------------
 %% @doc
