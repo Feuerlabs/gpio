@@ -21,6 +21,9 @@
 static int set_direction(volatile uint32_t* gpio_reg, 
 			 int reg, int pin, 
 			 gpio_direction_t direction);
+static int get_direction(volatile uint32_t* gpio_reg, 
+			 int reg, int pin, 
+			 gpio_direction_t* direction);
 static int set_mask(volatile uint32_t* gpio_reg, 
 		    int reg, uint32_t mask);
 static int clr_mask(volatile uint32_t* gpio_reg, 
@@ -33,6 +36,7 @@ gpio_methods_t gpio_bcm2835_meth = {
     .base = GPIO_BASE,     // base address in kernel space (not physical space)
     .len =  GPIO_LEN,      // length of register area
     .set_direction = set_direction,
+    .get_direction = get_direction,
     .set_mask = set_mask,
     .clr_mask = clr_mask,
     .get_mask = get_mask
@@ -68,6 +72,39 @@ static int set_direction(volatile uint32_t* gpio_reg,
     fsel = gpio_reg[index];
     fsel = (fsel & ~(7 << fbit)) | (mode << fbit);
     gpio_reg[index] = fsel;
+    return 0;
+}
+
+static int get_direction(volatile uint32_t* gpio_reg, 
+			 int reg, int pin, 
+			 gpio_direction_t* direction)
+{
+    int index;
+    int freg;
+    int fbit;
+    uint32_t mode;
+    uint32_t fsel;
+
+    DEBUGF("get_direction: pin %d:%d", reg, pin);
+    
+    freg = pin / 10;
+    fbit = (pin % 10)*3;
+
+    if (reg == 0)
+	index = GPIO_FSEL0 + freg;
+    else 
+	index = GPIO_FSEL1 + freg;
+
+    fsel = gpio_reg[index];
+    mode = (fsel >> fbit) & 7;
+
+    if (mode == GPIO_MODE_IN)
+	*direction = gpio_direction_in;
+    else if (mode == GPIO_MODE_OUT)
+	*direction = gpio_direction_out; 
+    else
+	*direction = gpio_direction_undef;
+
     return 0;
 }
 
