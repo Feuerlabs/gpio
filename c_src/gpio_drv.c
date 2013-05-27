@@ -1326,7 +1326,7 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	direct_access = get_uint8(buf+2);
 
 	DEBUGF("gpio_drv: init: pin_reg=%d, pin=%d, direct_access %d", 
-	       cmd, len, direct_access);
+	       pin_reg, pin, direct_access);
 
 	// Chip set must be known for direct access
 	if (direct_access && (ctx->chipset == gpio_chipset_none))

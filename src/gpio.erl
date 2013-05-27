@@ -149,7 +149,7 @@ init_direct(Pin) ->
 -spec gpio:init_direct(PinReg::unsigned(), Pin::unsigned()) -> 
 			      ok | {error,Reason::posix()}.
 init_direct(PinReg, Pin) 
-  when is_integer(Pin), Pin >= 0 ->
+  when is_integer(PinReg), PinReg >= 0, is_integer(Pin), Pin >= 0 ->
     call(?GPIO_PORT, ?CMD_INIT, <<PinReg:8, Pin:8, ?DIRECT_ACCESS_ON:8>>).
 
 
