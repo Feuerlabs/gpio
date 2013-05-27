@@ -63,6 +63,7 @@ typedef int  ErlDrvSSizeT;
 #define CMD_GET_INTERRUPT 11
 #define CMD_DEBUG_LEVEL   12
 #define CMD_DUMP          13
+#define CMD_GET_MASK      14
 
 // Direct access
 #define DIRECT_ACCESS_OFF 0
@@ -93,9 +94,9 @@ typedef struct _gpio_ctx_t
     bool auto_create;     // Auto export/create register
     gpio_chipset_t chipset;
     gpio_methods_t* meth;         // pin register mask access
-    volatile uint32_t *gpio_reg;  //Pointer to physical gpio memory
-    uint32_t reg0_direct_pins; // Mask for pins with direct access
-    uint32_t reg1_direct_pins; // Mask for pins with direct access
+    volatile uint32_t *gpio_reg;  // Pointer to physical gpio memory
+    uint32_t reg0_direct_pins;    // Mask for pins with direct access
+    uint32_t reg1_direct_pins;    // Mask for pins with direct access
     ErlDrvEvent epollfd;
 } gpio_ctx_t;
 
@@ -799,7 +800,7 @@ static int gpio_set_mask_on_reg(gpio_ctx_t* ctx,
 
     // Take care of rest (if any)
     while (indirect_mask) {
-	DEBUGF("Set indirect mask 0x%x on linked list.", indirect_mask);
+	DEBUGF("Set indirect mask 0x%x on array.", indirect_mask);
 	if (indirect_mask & 1) {
 	    if (gpp[pin] == NULL) {
 		if (!ctx->auto_create) 
@@ -842,6 +843,93 @@ static int gpio_set_mask_on_list(gpio_ctx_t* ctx,
 	mask >>= 1;
 	pin ++;
     }
+    return GPIO_OK;
+}
+
+
+//--------------------------------------------------------------------
+// Get masked pinreg bits
+//--------------------------------------------------------------------
+static int gpio_get_mask_on_reg(gpio_ctx_t* ctx,
+				uint8_t pin_reg,
+				uint32_t  mask,
+				uint32_t* valuep)
+{
+    gpio_pin_t* gp;
+    gpio_pin_t** gpp;
+    uint32_t value = 0;
+    uint32_t indirect_mask = mask;
+    uint8_t pin = 0;
+
+    DEBUGF("Get mask for pinreg %d", pin_reg);
+
+    if (pin_reg == 0) {
+	uint32_t m = mask & ctx->reg0_direct_pins;
+	DEBUGF("get direct mask 0x%x on register %d", m, pin_reg);
+	if (m)
+	    value = (*ctx->meth->get_mask)(ctx->gpio_reg,pin_reg);
+	value &= m;
+	indirect_mask = mask & ~(ctx->reg0_direct_pins);
+	gpp = ctx->reg0;
+    }
+    else if (pin_reg == 1) {
+	uint32_t m = mask & ctx->reg1_direct_pins;
+	DEBUGF("get direct mask 0x%x on register %d", m, pin_reg);
+	if (m)
+	    value = (*ctx->meth->get_mask)(ctx->gpio_reg,pin_reg);
+	value &= m;
+	indirect_mask = mask & ~(ctx->reg1_direct_pins);
+	gpp = ctx->reg1;
+    }
+    else 
+	return GPIO_NOK;
+
+    while (indirect_mask) {
+	DEBUGF("Get indirect mask 0x%x from array.", indirect_mask);
+	if (indirect_mask & 1) {
+	    uint8_t val;
+	    if ((gp = gpp[pin]) != NULL) {
+		if (gpio_get_state(ctx, gp, &val) == GPIO_OK) {
+		    if (val)
+			value |= (1 << pin);
+		}
+	    }
+	}
+	indirect_mask >>= 1;
+	pin ++;
+    }
+    *valuep = value;
+    return GPIO_OK;
+}
+
+//--------------------------------------------------------------------
+// Get masked pinreg bits
+//--------------------------------------------------------------------
+
+static int gpio_get_mask_on_list(gpio_ctx_t* ctx,
+				 uint8_t pin_reg,
+				 uint32_t  mask,
+				 uint32_t* valuep)
+{
+    uint8_t pin = 0;
+    uint32_t value = 0;
+    gpio_pin_t* gp;
+
+    while (mask) {
+	DEBUGF("Get mask 0x%x on linked list.", mask);
+	if (mask & 1) {
+	    if ((gp=find_pin(ctx, pin_reg, pin, NULL)) != NULL) {
+		uint8_t val;
+		if (gpio_get_state(ctx, gp, &val) == GPIO_OK) {
+		    if (val)
+			value |= (1 << pin);
+		}
+	    }
+	}
+	mask >>= 1;
+	pin ++;
+    }
+    *valuep = value;
     return GPIO_OK;
 }
 
@@ -1399,6 +1487,20 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	goto ok;
     }
 
+    case CMD_GET_MASK: {
+	uint32_t mask;
+	uint32_t value;
+	if (len != 5) goto badarg;
+	pin_reg = get_uint8(buf);
+	mask = get_uint32(buf+1);
+
+	if ((pin_reg == 0) || (pin_reg == 1))
+	    gpio_get_mask_on_reg(ctx, pin_reg, mask, &value);
+	else
+	    gpio_get_mask_on_list(ctx, pin_reg, mask, &value);
+	return ctl_reply(4, &value, sizeof(value), rbuf, rsize);
+    }
+
     case CMD_SET_INTERRUPT: {
 	gpio_interrupt_t intval;
 
@@ -1424,8 +1526,10 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	    gpio_get_direction(ctx, gp, &direction);
 	    if (direction != gpio_direction_in)
 		goto badarg;
-	    if (add_interrupt(ctx, gp) == GPIO_NOK)
-		goto error;
+	    if (gp->interrupt != gpio_interrupt_none) {
+		if (add_interrupt(ctx, gp) == GPIO_NOK)
+		    goto error;
+	    }
 	    gp->interrupt = intval;
 	    gp->target = driver_caller(ctx->port);
 	}
