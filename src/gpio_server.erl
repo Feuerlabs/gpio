@@ -24,7 +24,8 @@
 -include("gpio.hrl").
 
 %% API
--export([start_link/1]).
+-export([start_link/1,
+	 stop/0]).
 
 %% gen_server callbacks
 -export([init/1, 
@@ -55,6 +56,17 @@ start_link(Args) ->
 	end,
 
     gen_server:F({local, ?GPIO_SRV}, ?MODULE, Args, []).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Stops the server.
+%% @end
+%%--------------------------------------------------------------------
+-spec stop() -> ok | {error, Error::term()}.
+
+stop() ->
+    gen_server:call(?GPIO_SRV, stop).
+
 
 %%--------------------------------------------------------------------
 %% @private
