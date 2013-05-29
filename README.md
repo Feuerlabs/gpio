@@ -19,22 +19,31 @@ can be found [here](https://github.com/erlang/otp/wiki/Installation)
 
 gpio is built using rebar that can be found [here](https://github.com/basho/rebar), with building instructions [here](https://github.com/basho/rebar/wiki/Building-rebar).
 
-### Downloading
+### Download
 
 Clone the repository in a suitable location:
 
 ```
-$ git clone git://github.com/tonyrog/gpio.git
+$ git clone git://github.com/Feuerlabs/gpio.git
 ```
+### Build
+
+Rebar will compile all needed dependencies.<br/>
+Compile:
+
+```sh
+$ cd gpio
+$ rebar compile
+...
+==> gpio (compile)
+```
+
 ### Run
 
 gpio is started in a standard erlang fashion:
 
 ```
 $ erl
-```
-
-```
 (node@host) 1> application:start(gpio).
 ```
 
@@ -72,9 +81,6 @@ To generate the documentation do:
 
 ```
 $ cd gpio
-```
-
-```
 $ rebar doc
 ```
 
