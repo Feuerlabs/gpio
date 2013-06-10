@@ -21,6 +21,7 @@
 
 -type unsigned() :: non_neg_integer().
 -type posix() :: atom().
+-type uint1() :: 0..1.
 
 -define(GPIO_SRV, gpio_server).
 -define(GPIO_DRV, gpio_drv).
