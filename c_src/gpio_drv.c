@@ -81,7 +81,6 @@ typedef struct gpio_pin_t
     bool direct; // Not needed ??
     struct gpio_pin_t* next;   // when linked    
     ErlDrvEvent fd;   // To /sys/class/gpio/gpioX/value
-    gpio_direction_t direction;
     gpio_interrupt_t interrupt;
     ErlDrvTermData target;     // interrupt target
 } gpio_pin_t;
@@ -242,7 +241,6 @@ static gpio_pin_t* create_pin(gpio_ctx_t* ctx,
     gp->direct = false;
     gp->interrupt = 0;
     gp->fd = NULL;
-    gp->direction = gpio_direction_in; // assume in for now
     gp->next = NULL;
 
     // If register 0 or 1 use predefined arrays
@@ -443,8 +441,6 @@ static gpio_pin_t* init_pin(gpio_ctx_t* ctx,
     return gp;
 }
 
-
-
 //--------------------------------------------------------------------
 // Go through necessary release steps
 //--------------------------------------------------------------------
@@ -515,14 +511,83 @@ static int gpio_set_direction(gpio_ctx_t* ctx,
     else 
 	result = gpio_set_direction_indirect(gp, direction);
 
-    if (result == GPIO_OK) {
-	// high and low are special cases of out
-	if ((direction == gpio_direction_low) ||
-	    (direction == gpio_direction_high))
-	    gp->direction = gpio_direction_out;
-	else
-	    gp->direction = direction;
+    return result;
+}
+
+//--------------------------------------------------------------------
+// Get pin state from value file
+//--------------------------------------------------------------------
+static int gpio_get_direction_indirect(gpio_pin_t* gp, 
+				       gpio_direction_t *dp)
+{
+    char path[128];
+    char *fpath = "/sys/class/gpio/gpio%d/direction";
+    int n;
+    int fd;
+    char direction[11];
+
+    if (snprintf(path, sizeof(path), fpath, gp->pin) >= sizeof(path)) {
+        DEBUGF("Failed to format %s: reason , too long", fpath);
+	gpio_errno = EINVAL;
+	return GPIO_NOK; // format too long
     }
+
+    if ((fd = open(path, O_RDONLY)) < 0) {
+	gpio_errno = errno;
+        DEBUGF("Failed to open %s: reason, %s", path, strerror(errno));
+	return GPIO_NOK;
+    }
+
+    lseek(INT_EVENT(fd), 0, SEEK_SET);
+
+    n = read(INT_EVENT(fd), &direction, 10);
+    gpio_errno = errno; // If needed
+    close(fd);
+
+    if (n < 1) return GPIO_NOK;
+    direction[n] = '\0';
+
+    switch(direction[0]) {
+    case 'i': 
+	if (strcmp(direction,"in\n") == 0) *dp = gpio_direction_in; 
+	break;
+    case 'o': 
+	if  (strcmp(direction,"out\n") == 0) *dp = gpio_direction_out; 
+	break;
+    case 'l': 
+	if  (strcmp(direction,"low\n") == 0) *dp = gpio_direction_low; 
+	break;
+    case 'h': 
+	if  (strcmp(direction,"high\n") == 0) *dp = gpio_direction_high; 
+	break;
+    default:
+        DEBUGF("Illegal direction %s.", direction);
+	*dp = gpio_direction_undef;
+	gpio_errno = EINVAL;
+	return GPIO_NOK;
+    }
+
+    DEBUGF("Read direction %d for pin %d:%d from file %d.", 
+	   *dp, gp->pin_reg, gp->pin, fd);
+    return GPIO_OK;
+}
+
+//--------------------------------------------------------------------
+// Read pin direction
+//--------------------------------------------------------------------
+static int gpio_get_direction(gpio_ctx_t* ctx, 
+			      gpio_pin_t* gp, 
+			      gpio_direction_t* dp)
+{
+    int result;
+
+    DEBUGF("Get direction for pin %d:%d", gp->pin_reg, gp->pin);
+
+    if (gp->direct)
+	result = (*ctx->meth->get_direction)(ctx->gpio_reg,
+					     gp->pin_reg, gp->pin, dp);
+    else 
+	result = gpio_get_direction_indirect(gp, dp);
 
     return result;
 }
@@ -555,12 +620,7 @@ static gpio_pin_t* find_or_create_pin(gpio_ctx_t* ctx,
 static int gpio_set_indirect(gpio_pin_t* gp, gpio_state_t state)
 {
     int fd;
-    if (gp->direction != gpio_direction_out) {
-	DEBUGF("Pin has direction in, set state not possible.");
-	gpio_errno = EINVAL;
-	return GPIO_NOK;
-    }
-	
+
     fd = INT_EVENT(gp->fd);
     switch(state) {
     case gpio_state_low:
@@ -1038,22 +1098,22 @@ static void dump(gpio_ctx_t* ctx)
     for (i = 0; i < 32; i++) {
 	gp = ctx->reg0[i];
 	if (gp) 
-	    DEBUGF("Pin: %d, DirectFlag %d, Direction %d, Interrupt %d",
-		   gp->pin, gp->direct, gp->direction, gp->interrupt);
+	    DEBUGF("Pin: %d, DirectFlag %d, Interrupt %d",
+		   gp->pin, gp->direct, gp->interrupt);
     }
     DEBUGF("Register 1:");
     for (i = 0; i < 32; i++) {
 	gp = ctx->reg1[i];
 	if (gp)
-	    DEBUGF("Pin: %d, DirectFlag %d, Direction %d, Interrupt %d",
-		   gp->pin, gp->direct, gp->direction, gp->interrupt);
+	    DEBUGF("Pin: %d, DirectFlag %d, Interrupt %d",
+		   gp->pin, gp->direct, gp->interrupt);
     }
 
     DEBUGF("Other pins:");
     gp = ctx->first;
     while (gp) {
-	DEBUGF("Reg: %d, Pin: %d, DirectFlag %d, Direction %d, Interrupt %d",
-	       gp->pin_reg, gp->pin, gp->direct, gp->direction, gp->interrupt);
+	DEBUGF("Reg: %d, Pin: %d, DirectFlag %d, Interrupt %d",
+	       gp->pin_reg, gp->pin, gp->direct, gp->interrupt);
 	gp = gp->next;
     }
 
@@ -1266,7 +1326,7 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	direct_access = get_uint8(buf+2);
 
 	DEBUGF("gpio_drv: init: pin_reg=%d, pin=%d, direct_access %d", 
-	       cmd, len, direct_access);
+	       pin_reg, pin, direct_access);
 
 	// Chip set must be known for direct access
 	if (direct_access && (ctx->chipset == gpio_chipset_none))
@@ -1274,7 +1334,6 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	// Direct access only OK for register 0 and 1
 	if (direct_access && (pin_reg != 0) && (pin_reg != 1))
 	    goto badarg;
-
 	// Direct access only OK for pin 0-31
 	if (direct_access && (pin_reg > 31))
 	    goto badarg;
@@ -1376,6 +1435,7 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
     }
 
     case CMD_GET_DIRECTION: {
+	gpio_direction_t direction;
 	uint8_t dir;
 	if (len != 2) goto badarg;
 	pin_reg = get_uint8(buf);
@@ -1385,9 +1445,11 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	    gpio_errno = ENOENT;
 	    goto error;
 	}
-	dir = (uint8_t) gp->direction;
-	DEBUGF("Read direction %d for pin %d:%d", 
-	       dir, pin_reg, pin);
+	
+	if (gpio_get_direction(ctx, gp, &direction) == GPIO_NOK)
+	    goto error;
+	dir = (uint8_t) direction;
+	DEBUGF("Read direction %d for pin %d:%d", dir, pin_reg, pin);
 	return ctl_reply(1, &dir, sizeof(dir), rbuf, rsize);
     }
 
@@ -1459,7 +1521,10 @@ static ErlDrvSSizeT gpio_drv_ctl(ErlDrvData d,
 	    }
 	}
 	else {
-	    if (gp->direction != gpio_direction_in)
+	    gpio_direction_t direction = gpio_direction_undef;
+
+	    gpio_get_direction(ctx, gp, &direction);
+	    if (direction != gpio_direction_in)
 		goto badarg;
 	    if (gp->interrupt != gpio_interrupt_none) {
 		if (add_interrupt(ctx, gp) == GPIO_NOK)

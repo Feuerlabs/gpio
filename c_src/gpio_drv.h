@@ -22,6 +22,7 @@ typedef enum  {
 } gpio_direct_access_t;
 
 typedef enum {
+    gpio_direction_undef = 0,
     gpio_direction_in = 1,
     gpio_direction_out = 2,
     gpio_direction_low  = 3,  // out but start low
@@ -50,6 +51,8 @@ typedef struct {
     
     int (*set_direction)(volatile uint32_t* gpio_reg, int reg, int pin,
 			 gpio_direction_t direction);
+    int (*get_direction)(volatile uint32_t* gpio_reg, int reg, int pin,
+			 gpio_direction_t* direction);
     int (*set_mask)(volatile uint32_t* gpio_reg, int reg, uint32_t mask);
     int (*clr_mask)(volatile uint32_t* gpio_reg, int reg, uint32_t mask);
     uint32_t (*get_mask)(volatile uint32_t* gpio_reg, int reg);
