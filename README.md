@@ -72,6 +72,38 @@ The interface has the following functions for accessing several pins using a mas
 <li>clr_mask</li>
 </ul>
 
+### Example
+
+An example on how to setup a gpio interrupt.
+
+    gpio:set_interrupt(25, falling),
+    receive 
+        {gpio_interrupt, 0, 25, Value} ->
+          io:format("pin 25, high to low\n")
+    end.
+
+Given that the gpio application is started with the following config
+in environment (raspberry pi mode):
+
+    {gpio, [{options, [{chipset,bcm2835}]}]}
+
+Then we can do some fast gpio access
+
+    gpio:init_direct(24),
+    gpio:set_direction(24, low),
+    gpio:set(24),
+    timer:sleep(1010),
+    gpio:clr(24),  
+    timer:sleep(2210),
+    ok.
+
+This code will init pin 24 in direct access mode, using io registers
+instead of the normal linux /sys/class/gpio file interface. Then
+set pin 24 in output mode that default to a low output value. After that 
+the pin is set to high for 1010 ms and then set to low again.
+(This is the power-on sequence for a SIM900 GPRS module).
+
+
 For details see the generated documentation.
 
 ### Documentation

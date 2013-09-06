@@ -218,7 +218,8 @@ clr(PinReg, Pin)
 %% Gets value for pin in pin register 0.
 %% @end
 %%--------------------------------------------------------------------
--spec gpio:get(Pin::unsigned()) -> boolean().
+-spec gpio:get(Pin::unsigned()) -> 
+		      {ok,uint1()} | {error,Reason::posix()}.
 get(Pin) ->
     get(0, Pin).
 
@@ -227,7 +228,8 @@ get(Pin) ->
 %% Gets value for pin in pin register.
 %% @end
 %%--------------------------------------------------------------------
--spec gpio:get(PinReg::unsigned(), Pin::unsigned()) -> boolean().
+-spec gpio:get(PinReg::unsigned(), Pin::unsigned()) -> 
+		      {ok,uint1()} | {error,Reason::posix()}.
 get(PinReg, Pin) 
   when is_integer(PinReg), PinReg >= 0, is_integer(Pin), Pin >= 0 ->
     call(?GPIO_PORT, ?CMD_GET, <<PinReg:8, Pin:8>>).
