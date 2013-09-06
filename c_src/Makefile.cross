@@ -1,0 +1,27 @@
+#
+# Make the gpio_drv
+# usage: TARGET=arm-none-linux-gnueabi make -f Makefile.cross
+#
+
+OSNAME := $(shell uname -s)
+MACHINE := $(shell uname -m)
+ERLDIR	:= $(shell erl -noshell -eval "io:format([126,115,126,110],[code:root_dir()])" -s erlang halt)
+ERL_C_INCLUDE_DIR := $(ERLDIR)/usr/include
+CC = $(TARGET)-gcc
+LD = $(TARGET)-ld
+PRIVDIR=../priv
+DTHREAD=../../dthread
+
+OBJS = gpio_drv.o gpio_bcm2835.o
+
+LDFLAGS = -shared -fpic
+
+all : $(PRIVDIR)/gpio_drv.so
+
+override CFLAGS += -Wall -Wextra -Wswitch-default -Wswitch-enum -I$(ERL_C_INCLUDE_DIR) -I $(DTHREAD)/include -DDLOG_DEFAULT=DLOG_NONE
+
+$(PRIVDIR)/gpio_drv.so : $(OBJS)
+	$(CC) $(LDFLAGS) -o $@ $^
+
+lean:
+	$(RM) -f $(PRIVDIR)/gpio_drv.so $(OBJS)

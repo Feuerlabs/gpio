@@ -305,7 +305,7 @@ static int write_value(char* fpath, int pin, char* value)
     int n;
     int fd;
 
-    if (snprintf(path, sizeof(path), fpath, pin) >= sizeof(path)) {
+    if (snprintf(path, sizeof(path), fpath, pin) >= (int)sizeof(path)) {
         DEBUGF("Failed to format %s: reason , too long", fpath);
 	gpio_errno = EINVAL;
 	return GPIO_NOK; // format too long
@@ -336,7 +336,7 @@ static int is_exported(int pin)
     char *dirname = "/sys/class/gpio/gpio%d";
     struct stat st;
 
-    if (snprintf(path, sizeof(path), dirname, pin) >= sizeof(path))
+    if (snprintf(path, sizeof(path), dirname, pin) >= (int)sizeof(path))
 	return -1;
     if (stat(path, &st) < 0) {
 	gpio_errno = errno;
@@ -384,7 +384,7 @@ static int open_value_file(int pin)
     char path[128];
 
     // Generate a correct path to the file
-    if (snprintf(path, sizeof(path), fname, pin) >= sizeof(path)) {
+    if (snprintf(path, sizeof(path), fname, pin) >= (int)sizeof(path)) {
 	gpio_errno = EINVAL;
 	return -1;
     }
@@ -414,8 +414,6 @@ static gpio_pin_t* init_pin(gpio_ctx_t* ctx,
 
     //If pin not already exported, export it
     switch(is_exported(pin)) {
-    case -1:
-	return NULL;
     case 0:
 	// Tell linux we will take over pin
 	if (export(pin) != GPIO_OK)
@@ -423,6 +421,8 @@ static gpio_pin_t* init_pin(gpio_ctx_t* ctx,
 	break;
     case 1:
 	break;
+    default:
+	return NULL;
     }
 
     // Prepare value file
@@ -482,6 +482,7 @@ static int gpio_set_direction_indirect(gpio_pin_t* gp,
     case gpio_direction_out: value = "out"; break;
     case gpio_direction_low: value = "low"; break;
     case gpio_direction_high: value = "high"; break;
+    case gpio_direction_undef:
     default:
 	gpio_errno = EINVAL;
 	return GPIO_NOK;
@@ -526,7 +527,7 @@ static int gpio_get_direction_indirect(gpio_pin_t* gp,
     int fd;
     char direction[11];
 
-    if (snprintf(path, sizeof(path), fpath, gp->pin) >= sizeof(path)) {
+    if (snprintf(path, sizeof(path), fpath, gp->pin) >= (int)sizeof(path)) {
         DEBUGF("Failed to format %s: reason , too long", fpath);
 	gpio_errno = EINVAL;
 	return GPIO_NOK; // format too long
@@ -639,6 +640,7 @@ static int gpio_set_indirect(gpio_pin_t* gp, gpio_state_t state)
 	}
         return GPIO_OK;
 
+    case gpio_state_undef:
     default:
 	gpio_errno = EINVAL;
         break;
