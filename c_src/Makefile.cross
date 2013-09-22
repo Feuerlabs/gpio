@@ -9,19 +9,31 @@ ERLDIR	:= $(shell erl -noshell -eval "io:format([126,115,126,110],[code:root_dir
 ERL_C_INCLUDE_DIR := $(ERLDIR)/usr/include
 CC = $(TARGET)-gcc
 LD = $(TARGET)-ld
-PRIVDIR=../priv
+PRIVDIR=../priv/$(TARGET)
+OBJDIR=$(TARGET)
 DTHREAD=../../dthread
 
-OBJS = gpio_drv.o gpio_bcm2835.o
+OBJS = \
+     $(OBJDIR)/gpio_drv.o \
+     $(OBJDIR)/gpio_bcm2835.o
 
 LDFLAGS = -shared -fpic
 
-all : $(PRIVDIR)/gpio_drv.so
+all : $(OBJDIR) $(PRIVDIR) $(PRIVDIR)/gpio_drv.so
 
 override CFLAGS += -Wall -Wextra -Wswitch-default -Wswitch-enum -I$(ERL_C_INCLUDE_DIR) -I $(DTHREAD)/include -DDLOG_DEFAULT=DLOG_NONE
 
+$(OBJDIR):
+	@mkdir -p $(OBJDIR)
+
+$(PRIVDIR):
+	@mkdir -p $(PRIVDIR)
+
 $(PRIVDIR)/gpio_drv.so : $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $^
+
+$(OBJDIR)/%.o: %.c
+	$(CC) -c -o $@ $(CFLAGS) $<
 
 lean:
 	$(RM) -f $(PRIVDIR)/gpio_drv.so $(OBJS)
