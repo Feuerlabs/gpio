@@ -44,6 +44,16 @@ typedef int  ErlDrvSizeT;
 typedef int  ErlDrvSSizeT;
 #endif
 
+#if (ERL_DRV_EXTENDED_MAJOR_VERSION > 2) || ((ERL_DRV_EXTENDED_MAJOR_VERSION == 2) && (ERL_DRV_EXTENDED_MINOR_VERSION >= 1))
+#define DOUTPUT_TERM(thr, message, len) erl_drv_output_term((thr)->dport,(message),(len))
+#define DSEND_TERM(thr, to, message, len) erl_drv_send_term((thr)->dport,(to),(message),(len))
+
+#else
+#define DOUTPUT_TERM(thr, message, len) driver_output_term((thr)->port,(message),(len))
+#define DSEND_TERM(thr, to, message, len) driver_send_term((thr)->port,(to),(message),(len))
+#endif
+
+
 #define PORT_CONTROL_BINARY
 
 #define INT_EVENT(e) ((int)((long)(e)))
@@ -88,6 +98,7 @@ typedef struct gpio_pin_t
 typedef struct _gpio_ctx_t
 {
     ErlDrvPort port;
+    ErlDrvTermData dport;
     gpio_pin_t *reg0[32]; // Pin data for pins in reg 0
     gpio_pin_t *reg1[32]; // Pin data for pins in reg 1
     gpio_pin_t *first;    // Pins not in reg 0 and 1
@@ -431,7 +442,7 @@ static gpio_pin_t* init_pin(gpio_ctx_t* ctx,
 
     if ((gp=create_pin(ctx, pin_reg, pin)) == NULL)
 	close(fd);
-    gp->fd = (ErlDrvEvent) fd;
+    gp->fd = (ErlDrvEvent)((long)fd);
 
     // Set default interrupt target to process that created the pin struct
     gp->target = driver_caller(ctx->port);
@@ -1050,7 +1061,7 @@ static int send_interrupt(gpio_ctx_t* ctx, gpio_pin_t* gp)
     push_int(gp->pin);
     push_int(state);
     push_tuple(4);
-    driver_send_term(ctx->port, gp->target, message, i); 
+    DSEND_TERM(ctx, gp->target, message, i); 
     return 0;
 error:
     DEBUGF("send_interrupt read error %c for pin %d:%d", 
@@ -1213,6 +1224,7 @@ static ErlDrvData gpio_drv_start(ErlDrvPort port, char* command)
     memset(ctx, 0, sizeof(gpio_ctx_t));
 
     ctx->port = port;
+    ctx->dport = driver_mk_port(port);
     ctx->first = NULL;
     ctx->chipset = chipset;
     ctx->meth = meth;
@@ -1221,7 +1233,7 @@ static ErlDrvData gpio_drv_start(ErlDrvPort port, char* command)
     ctx->epollfd = (ErlDrvEvent) -1;
 #ifdef USE_EPOLL
     {
-	ctx->epollfd = (ErlDrvEvent) epoll_create(MAX_EPOLL_EVENTS);
+	ctx->epollfd = (ErlDrvEvent)((long)epoll_create(MAX_EPOLL_EVENTS));
 	if (INT_EVENT(ctx->epollfd) < 0) {
 	    DEBUGF("Failed epoll_create (%d) reason, %s", MAX_EPOLL_EVENTS,
 		   strerror(errno));
