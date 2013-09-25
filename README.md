@@ -17,7 +17,7 @@ Information on building and installing [Erlang/OTP](http://www.erlang.org)
 can be found [here](https://github.com/erlang/otp/wiki/Installation)
 ([more info](https://github.com/erlang/otp/blob/master/INSTALL.md)).
 
-gpio is built using rebar that can be found [here](https://github.com/basho/rebar), with building instructions [here](https://github.com/basho/rebar/wiki/Building-rebar).
+gpio is built using rebar that can be found [here](https://github.com/rebar/rebar), with building instructions [here](https://github.com/rebar/rebar/wiki/Building-rebar). rebar's dynamic configuration mechanism, described [here](https://github.com/rebar/rebar/wiki/Dynamic-configuration), is used so the environment variable `REBAR_DEPS` should be set to the directory where your erlang applications are located.
 
 ### Download
 
